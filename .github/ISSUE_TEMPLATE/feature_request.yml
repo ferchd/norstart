@@ -1,0 +1,27 @@
+name: Feature request
+description: Propose a capability or framework improvement.
+title: "feat: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: Explain the user or framework problem this solves.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the desired API or behavior. Include an example if helpful.
+      render: typescript
+    validations:
+      required: true
+  - type: textarea
+    id: architecture
+    attributes:
+      label: Architecture considerations
+      description: Explain how this fits the transport-agnostic core or profile-driver boundary.
+    validations:
+      required: true

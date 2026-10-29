@@ -1,0 +1,54 @@
+{
+	"description": "Norstar quality gates and project-specific Codex guidance.",
+	"hooks": {
+		"SessionStart": [
+			{
+				"hooks": [
+					{
+						"type": "command",
+						"command": "bun .codex/hooks/session-start.ts",
+						"statusMessage": "Loading Norstar engineering rules",
+						"timeout": 10
+					}
+				]
+			}
+		],
+		"UserPromptSubmit": [
+			{
+				"hooks": [
+					{
+						"type": "command",
+						"command": "bun .codex/hooks/prompt-guidance.ts",
+						"statusMessage": "Applying Norstar project rules",
+						"timeout": 10
+					}
+				]
+			}
+		],
+		"PostToolUse": [
+			{
+				"matcher": "apply_patch|Edit|Write",
+				"hooks": [
+					{
+						"type": "command",
+						"command": "bun .codex/hooks/lint-after-edit.ts",
+						"statusMessage": "Linting after file changes",
+						"timeout": 120
+					}
+				]
+			}
+		],
+		"Stop": [
+			{
+				"hooks": [
+					{
+						"type": "command",
+						"command": "bun .codex/hooks/quality-gate.ts",
+						"statusMessage": "Running lint, type checks, and tests",
+						"timeout": 300
+					}
+				]
+			}
+		]
+	}
+}

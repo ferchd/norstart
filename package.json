@@ -1,0 +1,61 @@
+{
+	"name": "norstar",
+	"description": "A Bun-first, transport-agnostic TypeScript framework for coordinating extensible application profiles.",
+	"version": "0.1.0",
+	"private": true,
+	"license": "MIT",
+	"homepage": "https://github.com/ferchd/Norstart#readme",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/ferchd/Norstart.git"
+	},
+	"bugs": {
+		"url": "https://github.com/ferchd/Norstart/issues"
+	},
+	"keywords": [
+		"bun",
+		"typescript",
+		"framework",
+		"application-framework",
+		"dependency-injection"
+	],
+	"exports": {
+		".": "./src/core/index.ts"
+	},
+	"module": "./src/core/index.ts",
+	"type": "module",
+	"packageManager": "bun@1.4.4",
+	"scripts": {
+		"start": "bun run examples/kernel-demo/main.ts",
+		"typecheck": "bun check && bun run typecheck:spec && bun run typecheck:examples",
+		"typecheck:spec": "tsc --noEmit --project tsconfig.spec.json",
+		"typecheck:examples": "tsc --noEmit --project tsconfig.examples.json",
+		"test": "bun test",
+		"verify": "bun run lint && bun run typecheck && bun test",
+		"lint": "eslint . --max-warnings=0 && prettier --check .",
+		"lint:fix": "eslint . --fix",
+		"format": "prettier --write .",
+		"commitlint": "commitlint",
+		"prepare": "husky"
+	},
+	"devDependencies": {
+		"@commitlint/cli": "^21.2.4",
+		"@commitlint/config-conventional": "^21.2.4",
+		"@eslint/js": "^10.0.1",
+		"@stylistic/eslint-plugin": "^5.10.0",
+		"@types/bun": "latest",
+		"@typescript/native": "npm:typescript@^7.0.2",
+		"eslint": "^10.13.0",
+		"globals": "^17.13.0",
+		"husky": "^9.1.7",
+		"prettier": "^3.9.10",
+		"typescript": "npm:@typescript/typescript6@^6.0.2",
+		"typescript-eslint": "^8.72.1"
+	},
+	"overrides": {
+		"typescript": "npm:@typescript/typescript6@^6.0.2"
+	},
+	"peerDependencies": {
+		"typescript": ">=6.0.2 <8"
+	}
+}

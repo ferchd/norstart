@@ -1,0 +1,8 @@
+[application]
+name = "norstar-kernel-demo"
+
+[profiles.background]
+type = "fake-persistent"
+
+[profiles.batch]
+type = "fake-finite"

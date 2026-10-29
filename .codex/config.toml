@@ -1,0 +1,12 @@
+[agents]
+enabled = true
+max_concurrent_threads_per_session = 3
+
+[agents.test_engineer]
+config_file = "./agents/test-engineer.toml"
+
+[agents.architecture_reviewer]
+config_file = "./agents/architecture-reviewer.toml"
+
+[agents.security_reviewer]
+config_file = "./agents/security-reviewer.toml"

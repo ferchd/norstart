@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+
+# Build output and test reports
+out/
+dist/
+coverage/
+*.tsbuildinfo
+
+# Environment files and secrets
+.env
+.env.*
+!.env.example
+
+# Logs and caches
+*.log
+.eslintcache
+.prettiercache
+.cache/
+
+# Local editor and operating system files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
