@@ -21,6 +21,7 @@ export interface RunResult {
 export interface ProfileInstance {
 	readonly mode: ExecutionMode;
 	readonly finished: Promise<void>;
+	/** Must honor abort requests; if start settles after shutdown begins, the Kernel calls stop once. */
 	start(signal: AbortSignal): void | Promise<void>;
 	stop(signal: AbortSignal): void | Promise<void>;
 }
@@ -34,6 +35,7 @@ export interface ProfileContext<TConfig extends object = Record<string, unknown>
 
 export interface ProfileDriver<TConfig extends object = Record<string, unknown>> {
 	readonly type: string;
+	/** Must honor abort requests and avoid registering resources after cancellation. */
 	create(context: ProfileContext<TConfig>): ProfileInstance | Promise<ProfileInstance>;
 }
 

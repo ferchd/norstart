@@ -7,7 +7,9 @@ import type {
 } from "./contracts.ts";
 import { ProfileRegistry } from "./manifest.ts";
 
-type Completion = { readonly error?: unknown };
+type Completion =
+	{ readonly status: "completed" } | { readonly status: "failed"; readonly error: unknown };
+type FatalError = { readonly error: unknown };
 
 export class Kernel {
 	private currentState: KernelState = "created";
@@ -18,21 +20,29 @@ export class Kernel {
 		id: string;
 		instance: ProfileInstance;
 		started: boolean;
+		startPending: boolean;
 		settled: boolean;
+		stopPromise?: Promise<void>;
 	}[] = [];
 	private readonly completion: Promise<Completion>;
+	private readonly stopRequested: Promise<void>;
 	private complete!: (value: Completion) => void;
+	private requestStop!: () => void;
 	private completedCount = 0;
 	private lifecycleOperation?: Promise<void>;
 	private stopPromise?: Promise<RunResult>;
 	private stopReason?: StopReason;
 	private stopResult?: RunResult;
-	private fatalError?: unknown;
+	private fatalError?: FatalError;
+	private shutdownDeadline?: number;
 
 	constructor(private readonly options: KernelOptions) {
 		this.registry = new ProfileRegistry(options.drivers);
 		this.completion = new Promise((resolve) => {
 			this.complete = resolve;
+		});
+		this.stopRequested = new Promise((resolve) => {
+			this.requestStop = resolve;
 		});
 	}
 
@@ -49,16 +59,16 @@ export class Kernel {
 		this.lifecycleOperation = operation;
 		const interrupted = this.stopPromise !== undefined;
 		try {
-			await operation;
+			await this.waitForLifecycleOrStop(operation);
 			if (!this.stopPromise) {
 				this.currentState = "ready";
 			}
 		} catch (error) {
 			if (!interrupted && !this.stopPromise) {
-				this.fatalError = error;
+				this.fatalError = { error };
 			}
 			await this.stop(this.stopReason ?? "failure");
-			if (!interrupted && this.fatalError !== undefined) {
+			if (!interrupted && this.fatalError) {
 				throw error;
 			}
 		} finally {
@@ -80,7 +90,18 @@ export class Kernel {
 				services: this.options.services,
 				signal: this.bootstrapAbort.signal,
 			});
-			const record = { id: definition.id, instance, started: false, settled: false };
+			if (this.stopPromise) {
+				await this.cleanupLateInstance(instance);
+
+				return;
+			}
+			const record = {
+				id: definition.id,
+				instance,
+				started: false,
+				startPending: false,
+				settled: false,
+			};
 			this.instances.push(record);
 			void instance.finished.then(
 				() => {
@@ -93,8 +114,8 @@ export class Kernel {
 						const error = new Error(
 							`Persistent profile "${record.id}" finished unexpectedly`,
 						);
-						this.fatalError = error;
-						this.resolveCompletion({ error });
+						this.fatalError = { error };
+						this.resolveCompletion({ status: "failed", error });
 
 						return;
 					}
@@ -106,8 +127,8 @@ export class Kernel {
 					if (this.stopPromise) {
 						return;
 					}
-					this.fatalError = error;
-					this.resolveCompletion({ error });
+					this.fatalError = { error };
+					this.resolveCompletion({ status: "failed", error });
 				},
 			);
 		}
@@ -127,17 +148,17 @@ export class Kernel {
 		this.lifecycleOperation = operation;
 		const interrupted = this.stopPromise !== undefined;
 		try {
-			await operation;
+			await this.waitForLifecycleOrStop(operation);
 			if (!this.stopPromise) {
 				this.currentState = "running";
 				this.updateCompletion();
 			}
 		} catch (error) {
 			if (!interrupted && !this.stopPromise) {
-				this.fatalError = error;
+				this.fatalError = { error };
 			}
 			await this.stop(this.stopReason ?? "failure");
-			if (!interrupted && this.fatalError !== undefined) {
+			if (!interrupted && this.fatalError) {
 				throw error;
 			}
 		} finally {
@@ -152,13 +173,23 @@ export class Kernel {
 			if (this.stopPromise) {
 				return;
 			}
-			if (this.fatalError !== undefined) {
-				throw this.fatalError;
+			const fatalErrorBeforeStart = this.getFatalError();
+			if (fatalErrorBeforeStart) {
+				throw fatalErrorBeforeStart.error;
 			}
 			record.started = true;
-			await record.instance.start(this.runAbort.signal);
-			if (this.fatalError !== undefined) {
-				throw this.fatalError;
+			record.startPending = true;
+			try {
+				await record.instance.start(this.runAbort.signal);
+			} finally {
+				record.startPending = false;
+				if (this.stopPromise) {
+					await this.stopInstance(record);
+				}
+			}
+			const fatalErrorAfterStart = this.getFatalError();
+			if (fatalErrorAfterStart) {
+				throw fatalErrorAfterStart.error;
 			}
 		}
 	}
@@ -171,8 +202,8 @@ export class Kernel {
 			throw new Error(`Cannot wait for exit in state "${this.currentState}"`);
 		}
 		const result = await this.completion;
-		if (result.error !== undefined) {
-			this.fatalError = result.error;
+		if (result.status === "failed") {
+			this.fatalError = { error: result.error };
 
 			return this.stop("failure");
 		}
@@ -191,49 +222,56 @@ export class Kernel {
 		this.currentState = "stopping";
 		this.bootstrapAbort.abort(reason);
 		this.runAbort.abort(reason);
-		this.resolveCompletion({});
+		this.resolveCompletion({ status: "completed" });
+		this.shutdownDeadline = Date.now() + (this.options.shutdownTimeoutMs ?? 10_000);
 		this.stopPromise = this.performStop(reason);
+		this.requestStop();
 
 		return this.stopPromise;
 	}
 
 	private async performStop(reason: StopReason): Promise<RunResult> {
+		const timeoutMs = this.options.shutdownTimeoutMs ?? 10_000;
+		const deadline = this.shutdownDeadline ?? Date.now() + timeoutMs;
+		const errors: unknown[] = [];
 		const lifecycleOperation = this.lifecycleOperation;
 		if (lifecycleOperation) {
 			try {
-				await lifecycleOperation;
-			} catch {
-				// Continue cleanup after a bootstrap or start operation fails.
-			}
-		}
-		const timeoutMs = this.options.shutdownTimeoutMs ?? 10_000;
-		const deadline = Date.now() + timeoutMs;
-		const errors: unknown[] = [];
-		for (const record of [...this.instances].reverse()) {
-			if (!record.started) {
-				continue;
-			}
-			try {
-				const remainingMs = Math.max(0, deadline - Date.now());
 				await this.withTimeout(
-					(signal) => record.instance.stop(signal),
-					remainingMs,
-					`Profile "${record.id}" shutdown timed out`,
+					() => lifecycleOperation,
+					Math.max(0, deadline - Date.now()),
+					"Kernel lifecycle operation timed out during shutdown",
 				);
 			} catch (error) {
 				errors.push(error);
 			}
 		}
+		for (const record of [...this.instances].reverse()) {
+			if (!record.started || record.startPending) {
+				continue;
+			}
+			try {
+				await this.stopInstance(record);
+			} catch (error) {
+				errors.push(error);
+			}
+		}
 		try {
-			await this.options.services.dispose();
+			await this.withTimeout(
+				() => this.options.services.dispose(),
+				Math.max(0, deadline - Date.now()),
+				"Service disposal timed out during shutdown",
+			);
 		} catch (error) {
 			errors.push(error);
 		}
-		if (errors.length && this.fatalError === undefined) {
-			this.fatalError = new AggregateError(errors, "Application shutdown failed");
+		if (errors.length > 0 && !this.fatalError) {
+			this.fatalError = {
+				error: new AggregateError(errors, "Application shutdown failed"),
+			};
 		}
-		this.currentState = this.fatalError === undefined ? "stopped" : "failed";
-		const finalReason = this.fatalError === undefined ? reason : "failure";
+		this.currentState = this.fatalError ? "failed" : "stopped";
+		const finalReason = this.fatalError ? "failure" : reason;
 		this.stopResult = this.result(finalReason);
 
 		return this.stopResult;
@@ -243,18 +281,22 @@ export class Kernel {
 		if (this.currentState !== "running") {
 			return;
 		}
-		if (this.fatalError !== undefined) {
-			this.resolveCompletion({ error: this.fatalError });
+		if (this.fatalError) {
+			this.resolveCompletion({ status: "failed", error: this.fatalError.error });
 
 			return;
 		}
 		if (this.completedCount === this.instances.length) {
-			this.resolveCompletion({});
+			this.resolveCompletion({ status: "completed" });
 		}
 	}
 
 	private resolveCompletion(value: Completion): void {
 		this.complete(value);
+	}
+
+	private getFatalError(): FatalError | undefined {
+		return this.fatalError;
 	}
 
 	private result(reason: StopReason): RunResult {
@@ -264,8 +306,46 @@ export class Kernel {
 			status: failed ? "failed" : reason === "completed" ? "completed" : "stopped",
 			exitCode: failed ? 1 : 0,
 			reason: failed ? "failure" : reason,
-			...(this.fatalError === undefined ? {} : { error: this.fatalError }),
+			...(this.fatalError === undefined ? {} : { error: this.fatalError.error }),
 		});
+	}
+
+	private async waitForLifecycleOrStop(operation: Promise<void>): Promise<void> {
+		const outcome = await Promise.race([
+			operation.then(() => "completed" as const),
+			this.stopRequested.then(() => "stopping" as const),
+		]);
+
+		if (outcome === "stopping" && this.stopPromise) {
+			await this.stopPromise;
+		}
+	}
+
+	private async cleanupLateInstance(instance: ProfileInstance): Promise<void> {
+		try {
+			await this.withTimeout(
+				(signal) => instance.stop(signal),
+				Math.max(0, (this.shutdownDeadline ?? Date.now()) - Date.now()),
+				"Late profile cleanup timed out",
+			);
+		} catch (error) {
+			if (!this.stopResult) {
+				throw error;
+			}
+		}
+	}
+
+	private stopInstance(record: (typeof this.instances)[number]): Promise<void> {
+		if (!record.stopPromise) {
+			const deadline = this.shutdownDeadline ?? Date.now();
+			record.stopPromise = this.withTimeout(
+				(signal) => record.instance.stop(signal),
+				Math.max(0, deadline - Date.now()),
+				`Profile "${record.id}" shutdown timed out`,
+			);
+		}
+
+		return record.stopPromise;
 	}
 
 	private async withTimeout<T>(

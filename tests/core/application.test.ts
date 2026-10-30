@@ -87,7 +87,7 @@ describe("Application", () => {
 			expect(result.status).toBe("stopped");
 			expect(result.exitCode).toBe(0);
 			expect(startCalls).toBe(0);
-			expect(stopCalls).toBe(0);
+			expect(stopCalls).toBe(1);
 		});
 	});
 

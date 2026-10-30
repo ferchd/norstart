@@ -24,6 +24,24 @@ function deferred() {
 	return { promise, resolve, reject };
 }
 
+async function within<T>(promise: Promise<T>, timeoutMs = 250): Promise<T> {
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	try {
+		return await Promise.race([
+			promise,
+			new Promise<never>((_, reject) => {
+				timer = setTimeout(() => {
+					reject(new Error(`Operation did not settle within ${timeoutMs} ms`));
+				}, timeoutMs);
+			}),
+		]);
+	} finally {
+		if (timer) {
+			clearTimeout(timer);
+		}
+	}
+}
+
 function config(types: Record<string, string>): ApplicationConfig {
 	return parseConfiguration(
 		Object.entries(types)
@@ -182,6 +200,170 @@ describe("Kernel contract", () => {
 		expect(app.state).toBe("failed");
 	});
 
+	test("uses one shutdown deadline across profiles and service disposal", async () => {
+		const events: string[] = [];
+		const services = new Container();
+		const service = Symbol("shutdown service");
+		services.register(
+			service,
+			() => ({
+				dispose: () => {
+					events.push("dispose:service");
+				},
+			}),
+			"singleton",
+		);
+		const slowStop: ProfileDriver = {
+			type: "slow",
+			create: () => ({
+				mode: "persistent",
+				finished: new Promise<void>(() => {}),
+				start: () => undefined,
+				stop: async () => {
+					events.push("stop:slow");
+					await new Promise((resolve) => setTimeout(resolve, 45));
+				},
+			}),
+		};
+		const hangingStop: ProfileDriver = {
+			type: "hanging",
+			create: ({ services: resolver }) => {
+				resolver.get(service);
+
+				return {
+					mode: "persistent",
+					finished: new Promise<void>(() => {}),
+					start: () => undefined,
+					stop: () => {
+						events.push("stop:hanging");
+
+						return new Promise<void>(() => {});
+					},
+				};
+			},
+		};
+		const app = kernel(
+			{ slow: "slow", hanging: "hanging" },
+			[slowStop, hangingStop],
+			80,
+			services,
+		);
+		await app.bootstrap();
+		await app.start();
+
+		const startedAt = Date.now();
+		const result = await app.stop();
+		const elapsed = Date.now() - startedAt;
+
+		expect(result.status).toBe("failed");
+		expect(events).toEqual(["stop:hanging", "stop:slow", "dispose:service"]);
+		expect(elapsed).toBeLessThan(125);
+	});
+
+	test("bounds shutdown when a profile driver never finishes creating an instance", async () => {
+		const createEntered = deferred();
+		const driver: ProfileDriver = {
+			type: "persistent",
+			create: () => {
+				createEntered.resolve();
+
+				return new Promise<ProfileInstance>(() => {});
+			},
+		};
+		const app = kernel({ server: "persistent" }, [driver], 10);
+		const bootstrap = app.bootstrap();
+		await createEntered.promise;
+
+		const result = await within(app.stop());
+		await within(bootstrap);
+
+		expect(result.status).toBe("failed");
+		expect(result.exitCode).toBe(1);
+		expect(app.state).toBe("failed");
+	});
+
+	test("bounds shutdown when a profile start operation never settles", async () => {
+		const startEntered = deferred();
+		const allowStartToFinish = deferred();
+		const stopCalled = deferred();
+		let stopCalls = 0;
+		const driver: ProfileDriver = {
+			type: "persistent",
+			create: () => ({
+				mode: "persistent",
+				finished: new Promise<void>(() => {}),
+				start: async () => {
+					startEntered.resolve();
+					await allowStartToFinish.promise;
+				},
+				stop: () => {
+					stopCalls++;
+					stopCalled.resolve();
+				},
+			}),
+		};
+		const app = kernel({ server: "persistent" }, [driver], 10);
+		await app.bootstrap();
+		const start = app.start();
+		await startEntered.promise;
+
+		const result = await within(app.stop());
+
+		expect(result.status).toBe("failed");
+		expect(result.exitCode).toBe(1);
+		expect(app.state).toBe("failed");
+		expect(stopCalls).toBe(0);
+
+		allowStartToFinish.resolve();
+		await within(start);
+		await within(stopCalled.promise);
+
+		expect(stopCalls).toBe(1);
+		expect(app.state).toBe("failed");
+		expect(await app.stop()).toBe(result);
+		expect(stopCalls).toBe(1);
+	});
+
+	test("cleans up a late-created profile without starting it after shutdown timeout", async () => {
+		const createEntered = deferred();
+		const allowCreateToFinish = deferred();
+		const cleanupCalled = deferred();
+		let startCalls = 0;
+		let stopCalls = 0;
+		const driver: ProfileDriver = {
+			type: "persistent",
+			create: async () => {
+				createEntered.resolve();
+				await allowCreateToFinish.promise;
+
+				return {
+					mode: "persistent",
+					finished: new Promise<void>(() => {}),
+					start: () => {
+						startCalls++;
+					},
+					stop: () => {
+						stopCalls++;
+						cleanupCalled.resolve();
+					},
+				};
+			},
+		};
+		const app = kernel({ server: "persistent" }, [driver], 10);
+		const run = app.bootstrap();
+		await createEntered.promise;
+
+		const stop = await within(app.stop());
+		allowCreateToFinish.resolve();
+		await within(cleanupCalled.promise);
+		await within(run);
+
+		expect(stop.status).toBe("failed");
+		expect(startCalls).toBe(0);
+		expect(stopCalls).toBe(1);
+		expect(app.state).toBe("failed");
+	});
+
 	test("Application.create builds the app without creating or starting profiles", async () => {
 		let created = false;
 		const drivers: ProfileDriver[] = ["fake-persistent", "fake-finite"].map((type) => ({
@@ -284,6 +466,32 @@ describe("Kernel contract", () => {
 		expect(result.exitCode).toBe(1);
 		expect(app.state).toBe("failed");
 		expect(events).toContain("stop:persistent");
+	});
+
+	test("treats a profile rejection with undefined as a failure", async () => {
+		const failed = deferred();
+		const driver: ProfileDriver = {
+			type: "persistent",
+			create: () => ({
+				mode: "persistent",
+				finished: failed.promise,
+				start: () => undefined,
+				stop: () => undefined,
+			}),
+		};
+		const app = kernel({ server: "persistent" }, [driver]);
+		await app.bootstrap();
+		await app.start();
+
+		const exited = app.waitForExit();
+		failed.reject(undefined);
+
+		const result = await exited;
+
+		expect(result.status).toBe("failed");
+		expect(result.exitCode).toBe(1);
+		expect(result.reason).toBe("failure");
+		expect("error" in result).toBe(true);
 	});
 
 	test("treats unexpected completion of a persistent profile as a failure", async () => {
