@@ -1,16 +1,50 @@
 # Norstar
 
-First milestone: a minimal Bun application core that coordinates multiple profile drivers without depending on a transport.
+Norstar is a Bun-first framework with a transport-agnostic Kernel and an HTTP profile built on `Bun.serve()`.
 
 ## Example
 
-The runnable kernel demo is isolated in [`examples/kernel-demo/`](examples/kernel-demo/). Run it with `bun run start`; its walkthrough and sample configuration live beside the example.
+Runnable demonstrations are isolated under [`examples/`](examples/). Run the kernel demo with `bun run start` or the HTTP demo with `bun run start:http`.
 
 ## Core contract
 
-`Application.configure()` reads and validates `framework.toml`. `.create()` builds the manifest and Kernel without starting profiles. `.run()` bootstraps, starts, supervises and shuts down the application. `Application.stop()` requests a controlled stop. The framework entry point is `src/core/index.ts`.
+`Application.configure()` reads and validates `framework.toml`. `.create()` builds the manifest and Kernel without starting profiles. `.run()` bootstraps, starts, supervises and shuts down the application. `Application.stop()` requests a controlled stop. The public composition entry point is `src/index.ts`; the transport-agnostic core remains available from `src/core/index.ts`.
 
 Profiles are described by named `[profiles.<id>]` TOML tables. A `ProfileDriver` creates a `ProfileInstance`; the Kernel only uses the generic instance lifecycle (`mode`, `finished`, `start`, `stop`). Adding another transport means implementing and registering a driver. The Kernel has no HTTP, TCP, routing or database code.
+
+## HTTP profile
+
+The public package entry point registers the HTTP profile automatically. Configure route modules in TOML:
+
+```toml
+[profiles.http]
+type = "http-server"
+port = 3000
+hostname = "127.0.0.1"
+
+[profiles.http.routes]
+api = "src/routes/api.ts"
+```
+
+Route modules import `Route` from `norstar/http` and declare handlers independently of `Application`:
+
+```typescript
+import { Route } from "norstar/http";
+
+Route.get("/health", () => ({ status: "ok" }));
+```
+
+The application entry point stays the same:
+
+```typescript
+import { Application } from "norstar";
+
+Application.configure().create().run();
+```
+
+Handlers may return a `Response`, string, JSON-serializable value, or `undefined`. Class controller targets use `[Controller, "method"]`; register controllers and their dependencies with the `configureServices` callback. Request scopes are disposed after the response body completes or is cancelled. Unknown errors produce a generic HTTP 500 response.
+
+The HTTP demo includes a local throughput comparison with a native `Bun.serve()` endpoint. Run it with `bun run benchmark:http`; results depend on the machine and environment.
 
 ```toml
 [application]

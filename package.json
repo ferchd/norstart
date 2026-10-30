@@ -20,13 +20,17 @@
 		"dependency-injection"
 	],
 	"exports": {
-		".": "./src/core/index.ts"
+		".": "./src/index.ts",
+		"./core": "./src/core/index.ts",
+		"./http": "./src/http/index.ts"
 	},
-	"module": "./src/core/index.ts",
+	"module": "./src/index.ts",
 	"type": "module",
 	"packageManager": "bun@1.4.4",
 	"scripts": {
 		"start": "bun run examples/kernel-demo/main.ts",
+		"start:http": "bun run examples/http-demo/main.ts",
+		"benchmark:http": "bun run examples/http-demo/benchmark.ts",
 		"typecheck": "bun check && bun run typecheck:spec && bun run typecheck:examples",
 		"typecheck:spec": "tsc --noEmit --project tsconfig.spec.json",
 		"typecheck:examples": "tsc --noEmit --project tsconfig.examples.json",

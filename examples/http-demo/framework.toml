@@ -1,0 +1,10 @@
+[application]
+name = "norstar-http-demo"
+
+[profiles.http]
+type = "http-server"
+port = 3000
+hostname = "127.0.0.1"
+
+[profiles.http.routes]
+api = "examples/http-demo/routes/api.ts"

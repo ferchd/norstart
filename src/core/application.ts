@@ -7,6 +7,7 @@ import { createManifest } from "./manifest.ts";
 export interface ApplicationOptions {
 	readonly configPath?: string;
 	readonly drivers?: readonly ProfileDriver[];
+	readonly configureServices?: (services: Container) => void;
 	readonly shutdownTimeoutMs?: number;
 }
 
@@ -62,11 +63,14 @@ class ConfiguredApplication {
 
 	create(): Application {
 		const config = loadConfigurationSync(this.options.configPath);
+		const services = new Container();
+		this.options.configureServices?.(services);
+
 		const kernel = new Kernel({
 			config,
 			manifest: createManifest(config),
 			drivers: this.options.drivers ?? [],
-			services: new Container(),
+			services,
 			shutdownTimeoutMs: this.options.shutdownTimeoutMs,
 		});
 
