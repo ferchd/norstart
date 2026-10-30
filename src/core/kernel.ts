@@ -3,6 +3,8 @@ import type {
 	KernelState,
 	ProfileInstance,
 	RunResult,
+	ServiceResolver,
+	ServiceToken,
 	StopReason,
 } from "./contracts.ts";
 import { ProfileRegistry } from "./manifest.ts";
@@ -79,6 +81,10 @@ export class Kernel {
 	}
 
 	private async performBootstrap(): Promise<void> {
+		const services: ServiceResolver = Object.freeze({
+			get: <T>(token: ServiceToken<T>): T => this.options.services.get(token),
+		});
+
 		for (const definition of this.options.manifest.profiles) {
 			if (this.stopPromise) {
 				return;
@@ -87,8 +93,9 @@ export class Kernel {
 			const instance = await driver.create({
 				id: definition.id,
 				config: definition.config,
-				services: this.options.services,
+				services,
 				signal: this.bootstrapAbort.signal,
+				createScope: () => this.options.services.createScope(),
 			});
 			if (this.stopPromise) {
 				await this.cleanupLateInstance(instance);

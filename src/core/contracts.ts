@@ -31,6 +31,7 @@ export interface ProfileContext<TConfig extends object = Record<string, unknown>
 	readonly config: Readonly<TConfig>;
 	readonly services: ServiceResolver;
 	readonly signal: AbortSignal;
+	createScope(): ServiceScope;
 }
 
 export interface ProfileDriver<TConfig extends object = Record<string, unknown>> {
