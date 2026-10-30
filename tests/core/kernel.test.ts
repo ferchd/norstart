@@ -36,6 +36,7 @@ function kernel(
 	types: Record<string, string>,
 	drivers: readonly ProfileDriver[],
 	shutdownTimeoutMs = 100,
+	services = new Container(),
 ) {
 	const settings = config(types);
 
@@ -43,7 +44,7 @@ function kernel(
 		config: settings,
 		manifest: createManifest(settings),
 		drivers,
-		services: new Container(),
+		services,
 		shutdownTimeoutMs,
 	});
 }
@@ -73,6 +74,44 @@ describe("Kernel contract", () => {
 			'No profile driver registered for type "http-server"',
 		);
 		expect(app.state).toBe("failed");
+	});
+
+	test("disposes services after a later driver fails during bootstrap", async () => {
+		const events: string[] = [];
+		const service = Symbol("bootstrap service");
+		const services = new Container();
+		services.register(
+			service,
+			() => ({
+				dispose: () => {
+					events.push("dispose:service");
+				},
+			}),
+			"singleton",
+		);
+		const first: ProfileDriver = {
+			type: "first",
+			create: ({ services: resolver }) => {
+				resolver.get(service);
+
+				return instance("first", new Promise<void>(() => {}), "persistent", events);
+			},
+		};
+		const second: ProfileDriver = {
+			type: "second",
+			create: () => {
+				throw new Error("second profile failed to create");
+			},
+		};
+		const app = kernel({ first: "first", second: "second" }, [first, second], 100, services);
+
+		await expect(app.bootstrap()).rejects.toThrow("second profile failed to create");
+		const result = await app.stop("failure");
+
+		expect(result.status).toBe("failed");
+		expect(events).toEqual(["dispose:service"]);
+		expect(await app.stop("requested")).toBe(result);
+		expect(events).toEqual(["dispose:service"]);
 	});
 
 	test("rejects duplicate profile driver types", () => {
@@ -245,6 +284,28 @@ describe("Kernel contract", () => {
 		expect(result.exitCode).toBe(1);
 		expect(app.state).toBe("failed");
 		expect(events).toContain("stop:persistent");
+	});
+
+	test("treats unexpected completion of a persistent profile as a failure", async () => {
+		const finished = deferred();
+		const events: string[] = [];
+		const driver: ProfileDriver = {
+			type: "persistent",
+			create: () => instance("server", finished.promise, "persistent", events),
+		};
+		const app = kernel({ server: "persistent" }, [driver]);
+		await app.bootstrap();
+		await app.start();
+		const exited = app.waitForExit();
+		finished.resolve();
+
+		const result = await exited;
+
+		expect(result.status).toBe("failed");
+		expect(result.exitCode).toBe(1);
+		expect(result.reason).toBe("failure");
+		expect(app.state).toBe("failed");
+		expect(events).toEqual(["start:server", "stop:server"]);
 	});
 
 	test("a new transport can be added by registering a driver against the existing contract", async () => {

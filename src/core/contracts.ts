@@ -44,7 +44,11 @@ export interface ServiceResolver {
 }
 
 export interface ServiceContainer extends ServiceResolver {
-	createScope(): ServiceResolver;
+	createScope(): ServiceScope;
+	dispose(): Promise<void>;
+}
+
+export interface ServiceScope extends ServiceResolver {
 	dispose(): Promise<void>;
 }
 
