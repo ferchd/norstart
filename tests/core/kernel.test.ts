@@ -132,6 +132,52 @@ describe("Kernel contract", () => {
 		expect(events).toEqual(["dispose:service"]);
 	});
 
+	test("provides driver-owned scopes without exposing container disposal", async () => {
+		const services = new Container();
+		const events: string[] = [];
+		const scopedToken = Symbol("profile scoped service");
+		let contextScopeAvailable = false;
+		let resolverCanDisposeContainer = true;
+		let resolverIsFrozen = false;
+		services.register(
+			scopedToken,
+			() => ({
+				dispose: () => {
+					events.push("dispose:scoped");
+				},
+			}),
+			"scoped",
+		);
+		const driver: ProfileDriver = {
+			type: "scoped-profile",
+			create: (context) => {
+				contextScopeAvailable = typeof context.createScope === "function";
+				resolverCanDisposeContainer = "dispose" in context.services;
+				resolverIsFrozen = Object.isFrozen(context.services);
+				const scope = context.createScope();
+				scope.get(scopedToken);
+
+				return instance(
+					"scoped-profile",
+					new Promise<void>(() => {}),
+					"persistent",
+					events,
+				);
+			},
+		};
+		const app = kernel({ worker: "scoped-profile" }, [driver], 100, services);
+
+		await app.bootstrap();
+
+		expect(contextScopeAvailable).toBe(true);
+		expect(resolverCanDisposeContainer).toBe(false);
+		expect(resolverIsFrozen).toBe(true);
+
+		await app.stop();
+
+		expect(events).toEqual(["dispose:scoped"]);
+	});
+
 	test("rejects duplicate profile driver types", () => {
 		const driver: ProfileDriver = {
 			type: "worker",
