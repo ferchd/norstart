@@ -17,6 +17,7 @@ export type {
 	RunResult,
 	ServiceContainer,
 	ServiceResolver,
+	ServiceScope,
 	ServiceToken,
 	StopReason,
 } from "./contracts.ts";
