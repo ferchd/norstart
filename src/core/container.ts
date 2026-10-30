@@ -5,12 +5,19 @@ type Lifetime = "singleton" | "transient" | "scoped";
 type Registration = { factory: Factory<unknown>; lifetime: Lifetime };
 type Disposable = { dispose(): void | Promise<void> };
 
+export class CircularDependencyError extends Error {
+	constructor(readonly path: readonly string[]) {
+		super(`Circular dependency detected: ${path.join(" -> ")}`);
+		this.name = "CircularDependencyError";
+	}
+}
+
 export class Container implements ServiceContainer {
 	private readonly factories = new Map<ServiceToken<unknown>, Registration>();
 	private readonly singletons = new Map<ServiceToken<unknown>, unknown>();
-	private readonly rootScoped = new Map<ServiceToken<unknown>, unknown>();
 	private readonly activeScopes = new Set<ServiceScope>();
 	private readonly disposables: unknown[] = [];
+	private readonly resolutionPath: ServiceToken<unknown>[] = [];
 	private singletonResolutionDepth = 0;
 	private disposed = false;
 	private disposePromise?: Promise<void>;
@@ -32,7 +39,7 @@ export class Container implements ServiceContainer {
 	}
 
 	get<T>(token: ServiceToken<T>): T {
-		return this.resolve(token, this, this.rootScoped, this.disposables);
+		return this.resolve(token, this, new Map(), this.disposables);
 	}
 
 	createScope(): ServiceScope {
@@ -94,7 +101,6 @@ export class Container implements ServiceContainer {
 
 	private async disposeServices(): Promise<void> {
 		this.singletons.clear();
-		this.rootScoped.clear();
 		const errors: unknown[] = [];
 
 		for (const scope of [...this.activeScopes].reverse()) {
@@ -133,7 +139,34 @@ export class Container implements ServiceContainer {
 		if (registration.lifetime === "scoped" && this.singletonResolutionDepth > 0) {
 			throw new Error("Singleton services cannot depend on scoped services");
 		}
+		if (registration.lifetime === "scoped" && resolver === this) {
+			throw new Error("Scoped services must be resolved from a service scope");
+		}
 
+		const cycleStart = this.resolutionPath.indexOf(token);
+		if (cycleStart !== -1) {
+			const path = [...this.resolutionPath.slice(cycleStart), token].map((entry) =>
+				this.describeToken(entry),
+			);
+
+			throw new CircularDependencyError(path);
+		}
+
+		this.resolutionPath.push(token);
+		try {
+			return this.resolveRegistered(token, registration, resolver, scoped, disposables);
+		} finally {
+			this.resolutionPath.pop();
+		}
+	}
+
+	private resolveRegistered<T>(
+		token: ServiceToken<T>,
+		registration: Registration,
+		resolver: ServiceResolver,
+		scoped: Map<ServiceToken<unknown>, unknown>,
+		disposables: unknown[],
+	): T {
 		if (registration.lifetime === "singleton" && this.singletons.has(token)) {
 			return this.singletons.get(token) as T;
 		}
@@ -163,6 +196,14 @@ export class Container implements ServiceContainer {
 		}
 
 		return value as T;
+	}
+
+	private describeToken(token: ServiceToken<unknown>): string {
+		if (typeof token === "symbol") {
+			return token.description ?? token.toString();
+		}
+
+		return token.name || "<anonymous service>";
 	}
 
 	private async disposeValues(values: unknown[], message: string): Promise<void> {
