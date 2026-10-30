@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Container } from "../../src/core/container.ts";
+import { CircularDependencyError, Container } from "../../src/core/container.ts";
 
 describe("Container", () => {
 	test("creates transient instances and reuses singleton instances", () => {
@@ -223,6 +223,85 @@ describe("Container", () => {
 		);
 
 		await container.dispose();
+	});
+
+	test("rejects scoped services from the root and resolves them within explicit scopes", async () => {
+		const container = new Container();
+		const events: string[] = [];
+		const scoped = Symbol("scoped service");
+		let creations = 0;
+		container.register(
+			scoped,
+			() => {
+				const id = ++creations;
+
+				return {
+					id,
+					dispose: () => {
+						events.push(`dispose:${id}`);
+					},
+				};
+			},
+			"scoped",
+		);
+
+		expect(() => container.get(scoped)).toThrow(
+			"Scoped services must be resolved from a service scope",
+		);
+		expect(creations).toBe(0);
+
+		const firstScope = container.createScope();
+		const secondScope = container.createScope();
+		const first = firstScope.get(scoped);
+
+		expect(firstScope.get(scoped)).toBe(first);
+		expect(secondScope.get(scoped)).not.toBe(first);
+		expect(creations).toBe(2);
+
+		await firstScope.dispose();
+		await secondScope.dispose();
+		await container.dispose();
+
+		expect(events).toEqual(["dispose:1", "dispose:2"]);
+	});
+
+	test("reports the complete path for a transitive circular dependency", () => {
+		const container = new Container();
+		const first = Symbol("A");
+		const second = Symbol("B");
+		const third = Symbol("C");
+		container.register(first, (resolver) => resolver.get(second));
+		container.register(second, (resolver) => resolver.get(third));
+		container.register(third, (resolver) => resolver.get(first));
+
+		let cycleError: unknown;
+		try {
+			container.get(first);
+		} catch (error) {
+			cycleError = error;
+		}
+
+		expect(cycleError).toBeInstanceOf(CircularDependencyError);
+		expect(cycleError).toMatchObject({
+			message: "Circular dependency detected: A -> B -> C -> A",
+			path: ["A", "B", "C", "A"],
+		});
+
+		const healthy = Symbol("healthy after cycle");
+		container.register(healthy, () => "healthy");
+		expect(container.get(healthy)).toBe("healthy");
+	});
+
+	test("rejects scoped services reached from the root through a transient", () => {
+		const container = new Container();
+		const scoped = Symbol("scoped root dependency");
+		const transient = Symbol("transient root consumer");
+		container.register(scoped, () => ({}), "scoped");
+		container.register(transient, (resolver) => resolver.get(scoped));
+
+		expect(() => container.get(transient)).toThrow(
+			"Scoped services must be resolved from a service scope",
+		);
 	});
 
 	test("rejects duplicate and missing registrations", () => {
