@@ -123,6 +123,108 @@ describe("Container", () => {
 		expect(events).toEqual(["dispose:singleton"]);
 	});
 
+	test("disposes active scopes before container singletons", async () => {
+		const container = new Container();
+		const events: string[] = [];
+		const scoped = Symbol("active scoped service");
+		const singleton = Symbol("container singleton");
+		container.register(
+			scoped,
+			() => ({
+				dispose: () => {
+					events.push("dispose:scoped");
+				},
+			}),
+			"scoped",
+		);
+		container.register(
+			singleton,
+			() => ({
+				dispose: () => {
+					events.push("dispose:singleton");
+				},
+			}),
+			"singleton",
+		);
+		const scope = container.createScope();
+		scope.get(scoped);
+		container.get(singleton);
+
+		await container.dispose();
+
+		expect(events).toEqual(["dispose:scoped", "dispose:singleton"]);
+		await scope.dispose();
+		expect(events).toEqual(["dispose:scoped", "dispose:singleton"]);
+		expect(() => scope.get(scoped)).toThrow("disposed");
+	});
+
+	test("waits for an active scope disposal before disposing container singletons", async () => {
+		const container = new Container();
+		const events: string[] = [];
+		let finishScopeDisposal!: () => void;
+		let signalScopeDisposal!: () => void;
+		const scopeDisposalEntered = new Promise<void>((resolve) => {
+			signalScopeDisposal = resolve;
+		});
+		const scopeDisposalGate = new Promise<void>((resolve) => {
+			finishScopeDisposal = resolve;
+		});
+		const scoped = Symbol("gated scoped service");
+		const singleton = Symbol("singleton waiting on scope");
+		container.register(
+			scoped,
+			() => ({
+				dispose: async () => {
+					events.push("scope:started");
+					signalScopeDisposal();
+					await scopeDisposalGate;
+					events.push("scope:finished");
+				},
+			}),
+			"scoped",
+		);
+		container.register(
+			singleton,
+			() => ({
+				dispose: () => {
+					events.push("singleton");
+				},
+			}),
+			"singleton",
+		);
+		const scope = container.createScope();
+		scope.get(scoped);
+		container.get(singleton);
+
+		const explicitScopeDisposal = scope.dispose();
+		await scopeDisposalEntered;
+		const containerDisposal = container.dispose();
+		await Promise.resolve();
+
+		expect(events).toEqual(["scope:started"]);
+
+		finishScopeDisposal();
+		await Promise.all([explicitScopeDisposal, containerDisposal]);
+
+		expect(events).toEqual(["scope:started", "scope:finished", "singleton"]);
+	});
+
+	test("rejects singleton dependencies on scoped services through transient services", async () => {
+		const container = new Container();
+		const scoped = Symbol("scoped dependency");
+		const transient = Symbol("transient dependency");
+		const singleton = Symbol("singleton consumer");
+		container.register(scoped, () => ({}), "scoped");
+		container.register(transient, (resolver) => resolver.get(scoped));
+		container.register(singleton, (resolver) => resolver.get(transient), "singleton");
+
+		expect(() => container.get(singleton)).toThrow(
+			"Singleton services cannot depend on scoped services",
+		);
+
+		await container.dispose();
+	});
+
 	test("rejects duplicate and missing registrations", () => {
 		const container = new Container();
 		const token = Symbol("service");

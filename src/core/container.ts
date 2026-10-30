@@ -9,8 +9,11 @@ export class Container implements ServiceContainer {
 	private readonly factories = new Map<ServiceToken<unknown>, Registration>();
 	private readonly singletons = new Map<ServiceToken<unknown>, unknown>();
 	private readonly rootScoped = new Map<ServiceToken<unknown>, unknown>();
+	private readonly activeScopes = new Set<ServiceScope>();
 	private readonly disposables: unknown[] = [];
+	private singletonResolutionDepth = 0;
 	private disposed = false;
+	private disposePromise?: Promise<void>;
 
 	register<T>(
 		token: ServiceToken<T>,
@@ -37,41 +40,82 @@ export class Container implements ServiceContainer {
 		const scoped = new Map<ServiceToken<unknown>, unknown>();
 		const disposables: unknown[] = [];
 		let scopeDisposed = false;
-		const scope: ServiceResolver = {
+		let scopeDisposePromise: Promise<void> | undefined;
+		const resolver: ServiceResolver = {
 			get: <T>(token: ServiceToken<T>): T => {
 				if (scopeDisposed) {
 					throw new Error("Service scope has been disposed");
 				}
 
-				return this.resolve(token, scope, scoped, disposables);
+				return this.resolve(token, resolver, scoped, disposables);
 			},
 		};
-
-		return {
-			get: scope.get,
-			dispose: async (): Promise<void> => {
-				if (scopeDisposed) {
-					return;
+		const scope: ServiceScope = {
+			get: resolver.get,
+			dispose: (): Promise<void> => {
+				if (scopeDisposePromise) {
+					return scopeDisposePromise;
 				}
 
 				scopeDisposed = true;
-				await this.disposeValues(
+				scopeDisposePromise = this.disposeValues(
 					disposables,
 					"One or more scoped services failed to dispose",
-				);
+				).finally(() => {
+					this.activeScopes.delete(scope);
+				});
+
+				return scopeDisposePromise;
 			},
 		};
+		this.activeScopes.add(scope);
+
+		return scope;
 	}
 
-	async dispose(): Promise<void> {
+	dispose(): Promise<void> {
+		if (this.disposePromise) {
+			return this.disposePromise;
+		}
+
 		if (this.disposed) {
-			return;
+			return Promise.resolve();
 		}
 
 		this.disposed = true;
+		this.disposePromise = this.disposeServices().catch((error: unknown) => {
+			this.disposePromise = undefined;
+
+			throw error;
+		});
+
+		return this.disposePromise;
+	}
+
+	private async disposeServices(): Promise<void> {
 		this.singletons.clear();
 		this.rootScoped.clear();
-		await this.disposeValues(this.disposables, "One or more services failed to dispose");
+		const errors: unknown[] = [];
+
+		for (const scope of [...this.activeScopes].reverse()) {
+			try {
+				await scope.dispose();
+			} catch (error) {
+				errors.push(error);
+			}
+		}
+
+		this.activeScopes.clear();
+
+		try {
+			await this.disposeValues(this.disposables, "One or more services failed to dispose");
+		} catch (error) {
+			errors.push(error);
+		}
+
+		if (errors.length > 0) {
+			throw new AggregateError(errors, "One or more container services failed to dispose");
+		}
 	}
 
 	private resolve<T>(
@@ -86,6 +130,9 @@ export class Container implements ServiceContainer {
 		if (!registration) {
 			throw new Error(`Service is not registered: ${String(token)}`);
 		}
+		if (registration.lifetime === "scoped" && this.singletonResolutionDepth > 0) {
+			throw new Error("Singleton services cannot depend on scoped services");
+		}
 
 		if (registration.lifetime === "singleton" && this.singletons.has(token)) {
 			return this.singletons.get(token) as T;
@@ -95,8 +142,17 @@ export class Container implements ServiceContainer {
 			return scoped.get(token) as T;
 		}
 
-		const factoryResolver = registration.lifetime === "singleton" ? this : resolver;
-		const value = registration.factory(factoryResolver);
+		let value: unknown;
+		if (registration.lifetime === "singleton") {
+			this.singletonResolutionDepth++;
+			try {
+				value = registration.factory(this);
+			} finally {
+				this.singletonResolutionDepth--;
+			}
+		} else {
+			value = registration.factory(resolver);
+		}
 
 		if (registration.lifetime === "singleton") {
 			this.singletons.set(token, value);
