@@ -4,13 +4,13 @@
 	"version": "0.1.0",
 	"private": true,
 	"license": "MIT",
-	"homepage": "https://github.com/ferchd/Norstart#readme",
+	"homepage": "https://github.com/ferchd/norstart#readme",
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/ferchd/Norstart.git"
+		"url": "https://github.com/ferchd/norstart.git"
 	},
 	"bugs": {
-		"url": "https://github.com/ferchd/Norstart/issues"
+		"url": "https://github.com/ferchd/norstart/issues"
 	},
 	"keywords": [
 		"bun",
