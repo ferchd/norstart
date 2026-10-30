@@ -18,7 +18,7 @@ describe("Container", () => {
 		expect(singletonCreations).toBe(1);
 	});
 
-	test("caches transient values once per resolver scope", () => {
+	test("resolves transient values again within the same resolver scope", () => {
 		const container = new Container();
 		const token = Symbol("scoped transient");
 		let creations = 0;
@@ -26,9 +26,101 @@ describe("Container", () => {
 
 		const firstScope = container.createScope();
 		const secondScope = container.createScope();
-		expect(firstScope.get(token)).toBe(firstScope.get(token));
-		expect(secondScope.get(token)).not.toBe(firstScope.get(token));
-		expect(creations).toBe(2);
+		const firstResolution = firstScope.get(token);
+		const secondResolution = firstScope.get(token);
+		const thirdResolution = secondScope.get(token);
+
+		expect(firstResolution).not.toBe(secondResolution);
+		expect(thirdResolution).not.toBe(secondResolution);
+		expect(creations).toBe(3);
+	});
+
+	test("reuses scoped services per scope and disposes them once in reverse order", async () => {
+		const container = new Container();
+		const events: string[] = [];
+		const first = Symbol("first scoped service");
+		const second = Symbol("second scoped service");
+		let firstCreations = 0;
+		let secondCreations = 0;
+		container.register(
+			first,
+			() => {
+				const id = ++firstCreations;
+
+				return {
+					id,
+					dispose: () => {
+						events.push(`first:${id}`);
+					},
+				};
+			},
+			"scoped",
+		);
+		container.register(
+			second,
+			() => {
+				const id = ++secondCreations;
+
+				return {
+					id,
+					dispose: () => {
+						events.push(`second:${id}`);
+					},
+				};
+			},
+			"scoped",
+		);
+		const firstScope = container.createScope();
+		const secondScope = container.createScope();
+		const firstScopeFirst = firstScope.get(first);
+		const firstScopeSecond = firstScope.get(second);
+		const secondScopeFirst = secondScope.get(first);
+		const secondScopeSecond = secondScope.get(second);
+
+		expect(firstScope.get(first)).toBe(firstScopeFirst);
+		expect(firstScope.get(second)).toBe(firstScopeSecond);
+		expect(secondScopeFirst).not.toBe(firstScopeFirst);
+		expect(secondScopeSecond).not.toBe(firstScopeSecond);
+
+		await firstScope.dispose();
+		await firstScope.dispose();
+
+		expect(events).toEqual(["second:1", "first:1"]);
+		expect(() => firstScope.get(first)).toThrow("disposed");
+
+		await secondScope.dispose();
+
+		expect(events).toEqual(["second:1", "first:1", "second:2", "first:2"]);
+		await container.dispose();
+		expect(events).toEqual(["second:1", "first:1", "second:2", "first:2"]);
+	});
+
+	test("shares singleton services across scopes and disposes them with the container", async () => {
+		const container = new Container();
+		const events: string[] = [];
+		const singleton = Symbol("singleton");
+		container.register(
+			singleton,
+			() => ({
+				dispose: () => {
+					events.push("dispose:singleton");
+				},
+			}),
+			"singleton",
+		);
+		const firstScope = container.createScope();
+		const secondScope = container.createScope();
+		const firstResolution = firstScope.get(singleton);
+
+		expect(secondScope.get(singleton)).toBe(firstResolution);
+		expect(container.get(singleton)).toBe(firstResolution);
+
+		await firstScope.dispose();
+		await secondScope.dispose();
+		expect(events).toEqual([]);
+
+		await container.dispose();
+		expect(events).toEqual(["dispose:singleton"]);
 	});
 
 	test("rejects duplicate and missing registrations", () => {

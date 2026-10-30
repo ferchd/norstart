@@ -6,11 +6,11 @@ on:
     paths-ignore:
       - "**/*.md"
       - "LICENSE"
-    pull_request:
-      branches: [main]
-      paths-ignore:
-        - "**/*.md"
-        - "LICENSE"
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - "LICENSE"
   workflow_dispatch:
   schedule:
     - cron: "23 5 * * 1"

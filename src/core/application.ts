@@ -23,10 +23,19 @@ export class Application {
 			return this.runPromise;
 		}
 		this.runPromise = this.execute();
-		void this.runPromise.catch((error) => {
-			console.error("Fatal application error:", error);
-			process.exitCode = 1;
-		});
+		void this.runPromise
+			.then((result) => {
+				if (result.exitCode !== 0) {
+					process.exitCode = result.exitCode;
+					if (result.error !== undefined) {
+						console.error("Fatal application error:", result.error);
+					}
+				}
+			})
+			.catch((error) => {
+				console.error("Fatal application error:", error);
+				process.exitCode = 1;
+			});
 
 		return this.runPromise;
 	}
