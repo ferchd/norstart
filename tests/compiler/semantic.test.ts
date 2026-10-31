@@ -64,6 +64,13 @@ test("ignores stale generated artifacts during checks and recompilation", async 
 			const project = join(directory, outFile === undefined ? "default" : "custom");
 			await mkdir(project);
 			await createProject(project);
+			if (outFile !== undefined) {
+				await writeFile(join(project, "src", "old-routes.ts"), "export {};");
+				await writeFile(
+					join(project, "framework.toml"),
+					'[profiles.http]\ntype = "http-server"\n[profiles.http.routes]\napi = "src/old-routes.ts"',
+				);
+			}
 			await writeFile(
 				join(project, "tsconfig.json"),
 				JSON.stringify({ include: ["**/*.ts"] }),
@@ -75,6 +82,16 @@ test("ignores stale generated artifacts during checks and recompilation", async 
 				join(project, "src", "catalog.service.ts"),
 			);
 			await writeFile(join(project, "src", "catalog.service.ts"), "export class Catalog {}");
+			if (outFile !== undefined) {
+				await rename(
+					join(project, "src", "old-routes.ts"),
+					join(project, "src", "new-routes.ts"),
+				);
+				await writeFile(
+					join(project, "framework.toml"),
+					'[profiles.http]\ntype = "http-server"\n[profiles.http.routes]\napi = "src/new-routes.ts"',
+				);
+			}
 
 			await checkApplication({ rootDirectory: project, outFile });
 			const { manifestPath } = await compileApplication({ rootDirectory: project, outFile });
@@ -82,6 +99,12 @@ test("ignores stale generated artifacts during checks and recompilation", async 
 
 			expect(manifest).toContain("catalog.service.ts");
 			expect(manifest).not.toContain("store.service.ts");
+			if (outFile !== undefined) {
+				const wrapper = await Bun.file(`${manifestPath}.route-0.ts`).text();
+
+				expect(wrapper).toContain("new-routes.ts");
+				expect(wrapper).not.toContain("old-routes.ts");
+			}
 		}
 	});
 }, 20000);
