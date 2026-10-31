@@ -22,3 +22,5 @@ export type {
 	ServiceToken,
 	StopReason,
 } from "./contracts.ts";
+export { setCompiledApplication } from "./compiled-application.ts";
+export type { CompiledApplicationDefinition } from "./compiled-application.ts";

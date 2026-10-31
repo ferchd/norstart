@@ -4,8 +4,11 @@ import { loadConfigurationSync } from "./configuration.ts";
 import { Kernel } from "./kernel.ts";
 import { createManifest } from "./manifest.ts";
 import { registerServiceModules } from "./service-modules.ts";
+import { getCompiledApplication } from "./compiled-application.ts";
+import type { CompiledApplicationDefinition } from "./compiled-application.ts";
 
 export interface ApplicationOptions {
+	readonly compiled?: CompiledApplicationDefinition;
 	readonly configPath?: string;
 	readonly drivers?: readonly ProfileDriver[];
 	readonly configureServices?: (services: Container) => void;
@@ -103,10 +106,16 @@ class ConfiguredApplication {
 	constructor(private readonly options: ApplicationOptions) {}
 
 	create(): Application {
-		const config = loadConfigurationSync(this.options.configPath);
+		const compiled = this.options.compiled ?? getCompiledApplication();
+		if (compiled && this.options.configPath) {
+			throw new Error("A compiled application cannot override its configuration path");
+		}
+
+		const config = compiled?.config ?? loadConfigurationSync(this.options.configPath);
 		const services = new Container();
+		compiled?.registerServices(services);
 		this.options.configureServices?.(services);
-		const manifest = createManifest(config);
+		const manifest = compiled?.manifest ?? createManifest(config);
 
 		const kernel = new Kernel({
 			config,
@@ -119,7 +128,7 @@ class ConfiguredApplication {
 		return new Application(
 			kernel,
 			services,
-			manifest.serviceModules,
+			compiled ? [] : manifest.serviceModules,
 			this.options.handleProcessSignals ?? true,
 		);
 	}

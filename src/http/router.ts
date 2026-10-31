@@ -47,6 +47,25 @@ const routeRegistry: RouteRegistryState =
 
 routeRegistryHost[routeRegistryKey] = routeRegistry;
 
+export function beginCompiledRoutes(): void {
+	if (routeRegistry.activeDefinitions) {
+		throw new Error("HTTP route collection is already active");
+	}
+
+	routeRegistry.activeDefinitions = [];
+}
+
+export function finishCompiledRoutes(modulePath: string): void {
+	const definitions = routeRegistry.activeDefinitions;
+	if (!definitions) {
+		throw new Error("HTTP route collection is not active");
+	}
+
+	validateUniqueRoutes(definitions);
+	routeRegistry.moduleDefinitions.set(resolve(modulePath), definitions);
+	routeRegistry.activeDefinitions = undefined;
+}
+
 export class Route {
 	static get(path: string, target: HttpRouteTarget): void {
 		this.register("GET", path, target);

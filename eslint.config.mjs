@@ -6,7 +6,7 @@ import tseslint from "typescript-eslint";
 
 export default defineConfig({
 	files: ["**/*.{js,mjs,cjs,ts,mts,cts}"],
-	ignores: ["node_modules/**", "dist/**", "coverage/**", ".husky/_/**"],
+	ignores: ["node_modules/**", "**/dist/**", "**/.norstar/**", "coverage/**", ".husky/_/**"],
 	extends: [js.configs.recommended, tseslint.configs.recommended],
 	plugins: {
 		"@stylistic": stylistic,

@@ -5,5 +5,5 @@
 		"noEmit": true
 	},
 	"include": ["examples/**/*.ts"],
-	"exclude": ["node_modules", "dist", "coverage"]
+	"exclude": ["node_modules", "**/dist", "**/.norstar", "coverage"]
 }

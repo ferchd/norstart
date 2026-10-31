@@ -1,0 +1,10 @@
+[application]
+name = "compiled-demo"
+
+[profiles.web]
+type = "http-server"
+hostname = "127.0.0.1"
+port = 3000
+
+[profiles.web.routes]
+api = "src/routes.ts"
