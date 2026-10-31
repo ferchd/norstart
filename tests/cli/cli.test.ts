@@ -182,13 +182,7 @@ describe("Norstar CLI", () => {
 				JSON.stringify({ private: true, dependencies: { norstar: `file:${archive}` } }),
 			);
 			const runnerInstall = await executeCommand(
-				[
-					process.execPath,
-					"install",
-					"--offline",
-					"--ignore-scripts",
-					"--backend=copyfile",
-				],
+				[process.execPath, "install", "--ignore-scripts", "--backend=copyfile"],
 				runner,
 			);
 			expect(runnerInstall.exitCode).toBe(0);
@@ -213,7 +207,7 @@ describe("Norstar CLI", () => {
 				configuration.replace("port = 3000", `port = ${port}`),
 			);
 			const installed = await executeCommand(
-				[process.execPath, "install", "--offline", "--ignore-scripts"],
+				[process.execPath, "install", "--ignore-scripts"],
 				application,
 			);
 			expect(installed.exitCode).toBe(0);
