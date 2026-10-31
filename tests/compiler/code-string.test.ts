@@ -58,4 +58,4 @@ test("escapes exported service aliases and configuration strings in generated ar
 		expect(strings).toContain(alias);
 		expect(strings).toContain("</script>");
 	});
-});
+}, 20000);

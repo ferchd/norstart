@@ -5,8 +5,10 @@ import { createManifest } from "../core/manifest.ts";
 import type { ApplicationConfig } from "../core/contracts.ts";
 import { ServiceAnalyzer } from "./analyzer.ts";
 import { quoteCodeString } from "./code-string.ts";
+import { readApplicationProject, validateApplicationTypes } from "./project.ts";
 
 export interface CompilerOptions {
+	readonly entry?: string;
 	readonly configPath?: string;
 	readonly rootDirectory?: string;
 	readonly outFile?: string;
@@ -94,9 +96,15 @@ function importPath(from: string, target: string): string {
 
 async function analyze(options: CompilerOptions) {
 	const application = await readApplication(options);
-	const analyzer = new ServiceAnalyzer([...application.files, ...application.routeFiles]);
+	const explicitFiles = [...application.files, ...application.routeFiles];
+	if (options.entry) {
+		explicitFiles.push(resolve(application.root, options.entry));
+	}
+	const project = readApplicationProject(application.root, explicitFiles);
+	const analyzer = new ServiceAnalyzer(project.files, project.options, application.root);
 	analyzer.validateRouteModules(application.routeFiles);
 	const services = analyzer.analyze(application.files);
+	validateApplicationTypes(analyzer.program, application.root, project.files);
 
 	return { ...application, analyzer, services };
 }

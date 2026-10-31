@@ -2,6 +2,7 @@ import { watch } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import type { CliOptions } from "./arguments.ts";
 import { buildApplication } from "./build.ts";
+import { reportCliError } from "./diagnostics.ts";
 
 export async function developApplication(
 	options: CliOptions,
@@ -41,7 +42,7 @@ export async function developApplication(
 				});
 			}
 		} catch (error) {
-			console.error(error);
+			reportCliError(error);
 		}
 	};
 	const watcher = watch(rootDirectory, { recursive: true }, (_event, filename) => {

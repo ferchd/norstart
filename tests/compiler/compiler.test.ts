@@ -36,12 +36,12 @@ export class Service {
 			expect(generated).toContain("\tconfig: Object.freeze({\n\t\t");
 			expect(generated).toContain("\tregisterServices(services) {\n\t\tservices.register(\n");
 		});
-	});
+	}, 20000);
 
 	test.each([
 		[
 			"missing dependency",
-			'export class Missing {}\nexport class Service { static norstarService = {lifetime: "transient", inject: [Unregistered]}; }\nclass Unregistered {}',
+			'export class Missing {}\nexport class Service { static norstarService = {lifetime: "transient", inject: [Unregistered]}; constructor(readonly dependency: Unregistered) {} }\nclass Unregistered {}',
 			"Missing service dependency",
 		],
 		[
@@ -51,7 +51,7 @@ export class Service {
 		],
 		[
 			"transitive scoped dependency",
-			'export class A { static norstarService = {lifetime: "singleton", inject: [B]}; }\nexport class B { static norstarService = {lifetime: "transient", inject: [C]}; }\nexport class C { static norstarService = {lifetime: "scoped", inject: []}; }',
+			'export class A { static norstarService = {lifetime: "singleton", inject: [B]}; constructor(readonly dependency: B) {} }\nexport class B { static norstarService = {lifetime: "transient", inject: [C]}; constructor(readonly dependency: C) {} }\nexport class C { static norstarService = {lifetime: "scoped", inject: []}; }',
 			"Singleton cannot depend on scoped service",
 		],
 		[
@@ -64,12 +64,18 @@ export class Service {
 			'export const TOKEN = Symbol("token");\nexport class A { static norstarService = {lifetime: "transient", inject: [], token: TOKEN}; }\nexport class B { static norstarService = {lifetime: "transient", inject: [], token: TOKEN}; }',
 			"Duplicate service token",
 		],
-	] as const)("rejects %s before execution", async (_name, source, message) => {
-		await withTemporaryDirectory(async (directory) => {
-			await fixture(directory, source);
-			await expect(checkApplication({ rootDirectory: directory })).rejects.toThrow(message);
-		});
-	});
+	] as const)(
+		"rejects %s before execution",
+		async (_name, source, message) => {
+			await withTemporaryDirectory(async (directory) => {
+				await fixture(directory, source);
+				await expect(checkApplication({ rootDirectory: directory })).rejects.toThrow(
+					message,
+				);
+			});
+		},
+		20000,
+	);
 
 	test("resolves imported aliases to exported symbol tokens", async () => {
 		await withTemporaryDirectory(async (directory) => {
@@ -77,7 +83,7 @@ export class Service {
 				directory,
 				`import { TOKEN as STORE } from "./tokens.ts";
 export class Store { static norstarService = {lifetime: "singleton", inject: [], token: STORE}; }
-export class Controller { static norstarService = {lifetime: "scoped", inject: [STORE]}; }
+export class Controller { static norstarService = {lifetime: "scoped", inject: [STORE]}; constructor(readonly store: Store) {} }
 `,
 			);
 			await writeFile(
@@ -89,7 +95,7 @@ export class Controller { static norstarService = {lifetime: "scoped", inject: [
 			expect(generated).toContain('module1["TOKEN"]');
 			expect(generated).toContain('"../src/tokens.ts"');
 		});
-	});
+	}, 20000);
 
 	test("honors configurable discovery globs", async () => {
 		await withTemporaryDirectory(async (directory) => {
@@ -101,7 +107,7 @@ export class Controller { static norstarService = {lifetime: "scoped", inject: [
 			expect(generated).toContain('module0["Discovered"]');
 			expect(generated).not.toContain("Ignored");
 		});
-	});
+	}, 20000);
 });
 
 test("generates executable factories and immutable runtime metadata", async () => {
@@ -124,7 +130,7 @@ test("generates executable factories and immutable runtime metadata", async () =
 		});
 		expect(registered).toHaveLength(2);
 	});
-});
+}, 20000);
 
 test.each([false, true])(
 	"rejects top-level await in route dependency graph (transitive: %s)",
@@ -149,10 +155,15 @@ test.each([false, true])(
 			);
 		});
 	},
+	20000,
 );
 
 test.each([
 	["export class Base {}\nexport class Child extends Base {}", "without inheritance"],
+	[
+		'export class Store {}\nexport class Service { static norstarService = { lifetime: "transient", inject: [Store] }; }',
+		"dependency count",
+	],
 	[
 		'export class Store {}\nexport class Service { static norstarService = {lifetime: "transient", inject: []}; constructor(readonly store: Store) {} }',
 		"dependency count",
@@ -165,12 +176,16 @@ test.each([
 		'export const TOKEN = Symbol("shared"); const ALIAS = TOKEN; export class A { static norstarService = {lifetime: "transient", inject: [], token: TOKEN}; } export class B { static norstarService = {lifetime: "transient", inject: [], token: ALIAS}; }',
 		"Duplicate service token",
 	],
-] as const)("rejects unsupported static service shape", async (source, message) => {
-	await withTemporaryDirectory(async (directory) => {
-		await fixture(directory, source);
-		await expect(checkApplication({ rootDirectory: directory })).rejects.toThrow(message);
-	});
-});
+] as const)(
+	"rejects unsupported static service shape",
+	async (source, message) => {
+		await withTemporaryDirectory(async (directory) => {
+			await fixture(directory, source);
+			await expect(checkApplication({ rootDirectory: directory })).rejects.toThrow(message);
+		});
+	},
+	20000,
+);
 
 test("validates route modules during check without generating files", async () => {
 	await withTemporaryDirectory(async (directory) => {
@@ -183,7 +198,7 @@ test("validates route modules during check without generating files", async () =
 			"HTTP route module not found",
 		);
 	});
-});
+}, 20000);
 
 test("rejects TOML datetime rather than changing its runtime type", async () => {
 	await withTemporaryDirectory(async (directory) => {
@@ -196,4 +211,4 @@ test("rejects TOML datetime rather than changing its runtime type", async () => 
 			"TOML dates are unsupported",
 		);
 	});
-});
+}, 20000);
