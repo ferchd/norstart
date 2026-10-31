@@ -4,6 +4,7 @@ import { parseConfiguration } from "../core/configuration.ts";
 import { createManifest } from "../core/manifest.ts";
 import type { ApplicationConfig } from "../core/contracts.ts";
 import { ServiceAnalyzer } from "./analyzer.ts";
+import { quoteCodeString } from "./code-string.ts";
 
 export interface CompilerOptions {
 	readonly configPath?: string;
@@ -120,7 +121,7 @@ export async function compileApplication(
 			imports.set(value.file, alias);
 		}
 
-		return `${alias}[${JSON.stringify(value.name)}]`;
+		return `${alias}[${quoteCodeString(value.name)}]`;
 	};
 	const registrations = application.services.map((service) => {
 		const implementation = reference(service.implementation);
@@ -143,7 +144,7 @@ export async function compileApplication(
 			"\t\tservices.register(",
 			`\t\t\t${token},`,
 			factory,
-			`\t\t\t${JSON.stringify(service.lifetime)},`,
+			`\t\t\t${quoteCodeString(service.lifetime)},`,
 			"\t\t);",
 		].join("\n");
 	});
@@ -182,10 +183,10 @@ export async function compileApplication(
 				);
 				await writeFile(
 					wrapperPath,
-					`import ${JSON.stringify(importPath(wrapperPath, preludePath))};\nimport ${JSON.stringify(importPath(wrapperPath, absolute))};\nimport { finishCompiledRoutes } from "norstar/http";\n\nfinishCompiledRoutes(${JSON.stringify(absolute)});\n`,
+					`import ${quoteCodeString(importPath(wrapperPath, preludePath))};\nimport ${quoteCodeString(importPath(wrapperPath, absolute))};\nimport { finishCompiledRoutes } from "norstar/http";\n\nfinishCompiledRoutes(${quoteCodeString(absolute)});\n`,
 				);
 				routeImports.push(
-					`import ${JSON.stringify(importPath(manifestPath, wrapperPath))};`,
+					`import ${quoteCodeString(importPath(manifestPath, wrapperPath))};`,
 				);
 			}
 		}
@@ -201,7 +202,7 @@ export async function compileApplication(
 		'import type { CompiledApplicationDefinition } from "norstar/core";',
 		...[...imports].map(
 			([file, alias]) =>
-				`import * as ${alias} from ${JSON.stringify(importPath(manifestPath, file))};`,
+				`import * as ${alias} from ${quoteCodeString(importPath(manifestPath, file))};`,
 		),
 		"",
 		`const definition: CompiledApplicationDefinition = {`,
@@ -222,12 +223,14 @@ export async function compileApplication(
 }
 
 function frozenLiteral(value: unknown, depth = 0): string {
+	if (typeof value === "string") {
+		return quoteCodeString(value);
+	}
 	if (value === undefined) {
 		return "undefined";
 	}
 	if (
 		value === null ||
-		typeof value === "string" ||
 		typeof value === "boolean" ||
 		(typeof value === "number" && Number.isFinite(value))
 	) {
@@ -249,7 +252,7 @@ function frozenLiteral(value: unknown, depth = 0): string {
 	) {
 		const entries = Object.entries(value).map(
 			([key, entry]) =>
-				`${"\t".repeat(depth + 1)}[${JSON.stringify(key)}]: ${frozenLiteral(entry, depth + 1)},`,
+				`${"\t".repeat(depth + 1)}[${quoteCodeString(key)}]: ${frozenLiteral(entry, depth + 1)},`,
 		);
 		if (entries.length === 0) {
 			return "Object.freeze({})";

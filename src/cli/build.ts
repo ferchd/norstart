@@ -2,6 +2,7 @@ import { writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, parse, relative, resolve, sep } from "node:path";
 import type { CliOptions } from "./arguments.ts";
 import { compileApplication } from "../compiler/index.ts";
+import { quoteCodeString } from "../compiler/code-string.ts";
 
 function importPath(from: string, target: string): string {
 	const path = relative(dirname(from), target).replaceAll("\\", "/");
@@ -35,7 +36,7 @@ export async function buildApplication(
 
 	await writeFile(
 		bootstrap,
-		`import definition from ${JSON.stringify(importPath(bootstrap, manifest.manifestPath))};\nimport { setCompiledApplication } from "norstar/core";\nsetCompiledApplication(definition);\nawait import(${JSON.stringify(importPath(bootstrap, entry))});\n`,
+		`import definition from ${quoteCodeString(importPath(bootstrap, manifest.manifestPath))};\nimport { setCompiledApplication } from "norstar/core";\nsetCompiledApplication(definition);\nawait import(${quoteCodeString(importPath(bootstrap, entry))});\n`,
 	);
 	const result = await Bun.build({
 		entrypoints: [bootstrap],
