@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, jest, test } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -248,6 +248,9 @@ describe("Kernel contract", () => {
 
 	test("uses one shutdown deadline across profiles and service disposal", async () => {
 		const events: string[] = [];
+		const firstEntered = deferred();
+		const secondEntered = deferred();
+		const disposalEntered = deferred();
 		const services = new Container();
 		const service = Symbol("shutdown service");
 		services.register(
@@ -255,24 +258,28 @@ describe("Kernel contract", () => {
 			() => ({
 				dispose: () => {
 					events.push("dispose:service");
+					disposalEntered.resolve();
+
+					return new Promise<void>(() => {});
 				},
 			}),
 			"singleton",
 		);
-		const slowStop: ProfileDriver = {
-			type: "slow",
+		const firstStop: ProfileDriver = {
+			type: "first",
 			create: () => ({
 				mode: "persistent",
 				finished: new Promise<void>(() => {}),
 				start: () => undefined,
 				stop: async () => {
-					events.push("stop:slow");
-					await new Promise((resolve) => setTimeout(resolve, 45));
+					events.push("stop:first");
+					firstEntered.resolve();
+					await new Promise((resolve) => setTimeout(resolve, 30));
 				},
 			}),
 		};
-		const hangingStop: ProfileDriver = {
-			type: "hanging",
+		const secondStop: ProfileDriver = {
+			type: "second",
 			create: ({ services: resolver }) => {
 				resolver.get(service);
 
@@ -280,30 +287,49 @@ describe("Kernel contract", () => {
 					mode: "persistent",
 					finished: new Promise<void>(() => {}),
 					start: () => undefined,
-					stop: () => {
-						events.push("stop:hanging");
-
-						return new Promise<void>(() => {});
+					stop: async () => {
+						events.push("stop:second");
+						secondEntered.resolve();
+						await new Promise((resolve) => setTimeout(resolve, 30));
 					},
 				};
 			},
 		};
 		const app = kernel(
-			{ slow: "slow", hanging: "hanging" },
-			[slowStop, hangingStop],
+			{ first: "first", second: "second" },
+			[firstStop, secondStop],
 			80,
 			services,
 		);
 		await app.bootstrap();
 		await app.start();
 
-		const startedAt = Date.now();
-		const result = await app.stop();
-		const elapsed = Date.now() - startedAt;
+		jest.useFakeTimers({ now: 0 });
+		try {
+			let settled = false;
+			const stopping = app.stop().then((result) => {
+				settled = true;
 
-		expect(result.status).toBe("failed");
-		expect(events).toEqual(["stop:hanging", "stop:slow", "dispose:service"]);
-		expect(elapsed).toBeLessThan(125);
+				return result;
+			});
+			await secondEntered.promise;
+			jest.advanceTimersByTime(30);
+			await firstEntered.promise;
+			jest.advanceTimersByTime(30);
+			await disposalEntered.promise;
+			jest.advanceTimersByTime(19);
+			await Promise.resolve();
+			expect(settled).toBe(false);
+			jest.advanceTimersByTime(1);
+			const result = await stopping;
+
+			expect(result.status).toBe("failed");
+			expect(events).toEqual(["stop:second", "stop:first", "dispose:service"]);
+			expect(Date.now()).toBe(80);
+		} finally {
+			jest.clearAllTimers();
+			jest.useRealTimers();
+		}
 	});
 
 	test("bounds shutdown when a profile driver never finishes creating an instance", async () => {
