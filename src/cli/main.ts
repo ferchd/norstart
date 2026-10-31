@@ -3,6 +3,7 @@ import { parseArguments } from "./arguments.ts";
 import { buildApplication } from "./build.ts";
 import { developApplication } from "./watch.ts";
 import { checkApplication } from "../compiler/index.ts";
+import { reportCliError } from "./diagnostics.ts";
 
 export async function runCli(
 	arguments_: readonly string[],
@@ -10,7 +11,11 @@ export async function runCli(
 ): Promise<void> {
 	const options = parseArguments(arguments_);
 	if (options.command === "check") {
-		await checkApplication({ rootDirectory, configPath: options.configPath });
+		await checkApplication({
+			rootDirectory,
+			configPath: options.configPath,
+			entry: options.entry,
+		});
 		console.log("Application check passed");
 
 		return;
@@ -28,7 +33,7 @@ if (import.meta.main) {
 	try {
 		await runCli(process.argv.slice(2));
 	} catch (error) {
-		console.error(error);
+		reportCliError(error);
 		process.exitCode = 1;
 	}
 }

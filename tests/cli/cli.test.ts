@@ -128,9 +128,31 @@ describe("Norstar CLI", () => {
 			const result = await execute(["build"], directory);
 			expect(result.exitCode).toBe(1);
 			expect(result.stderr).toContain("main.ts");
-			expect(result.stderr).toContain("Unexpected");
+			expect(result.stderr).toContain("TS1109");
 		});
 	}, 20000);
+
+	test.each(["check", "build"])(
+		"%s rejects semantic errors in a custom entry without evaluating it",
+		async (command) => {
+			await withApplication(async (directory) => {
+				await writeFile(
+					join(directory, "custom-entry.ts"),
+					'throw new Error("entry evaluated");\nexport const value: number = "wrong";',
+				);
+				const result = await execute([command, "--entry", "custom-entry.ts"], directory);
+				expect(result.exitCode).toBe(1);
+				expect(result.stderr).toContain("TS2322");
+				expect(result.stderr).toContain("custom-entry.ts");
+				expect(result.stderr).not.toContain("at throwDiagnostics");
+				expect(await Bun.file(join(directory, "evaluated.txt")).exists()).toBe(false);
+				expect(await Bun.file(join(directory, ".norstar/manifest.ts")).exists()).toBe(
+					false,
+				);
+			});
+		},
+		20000,
+	);
 
 	test("dev rebuilds after a source change", async () => {
 		await withApplication(async (directory) => {

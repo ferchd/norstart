@@ -14,8 +14,12 @@ export class ServiceAnalyzer {
 	readonly program: ts.Program;
 	private readonly checker: ts.TypeChecker;
 
-	constructor(files: readonly string[]) {
-		this.program = ts.createProgram([...files], {
+	constructor(
+		files: readonly string[],
+		options: ts.CompilerOptions = {},
+		directory = process.cwd(),
+	) {
+		const compilerOptions: ts.CompilerOptions = {
 			module: ts.ModuleKind.Preserve,
 			moduleDetection: ts.ModuleDetectionKind.Force,
 			moduleResolution: ts.ModuleResolutionKind.Bundler,
@@ -24,7 +28,11 @@ export class ServiceAnalyzer {
 			allowJs: true,
 			skipLibCheck: true,
 			noEmit: true,
-		});
+			...options,
+		};
+		const host = ts.createCompilerHost(compilerOptions);
+		host.getCurrentDirectory = () => directory;
+		this.program = ts.createProgram([...files], compilerOptions, host);
 		this.checker = this.program.getTypeChecker();
 	}
 
@@ -249,6 +257,9 @@ export class ServiceAnalyzer {
 			});
 		}
 		const constructor = declaration.members.find(ts.isConstructorDeclaration);
+		if (!constructor && inject.length > 0) {
+			throw new Error(`Service dependency count does not match constructor: ${symbol.name}`);
+		}
 		if (constructor) {
 			const required = constructor.parameters.filter(
 				(parameter) => !parameter.questionToken && !parameter.initializer,
@@ -309,13 +320,31 @@ export class ServiceAnalyzer {
 				return;
 			}
 
-			for (const dependency of service.inject) {
+			for (const [index, dependency] of service.inject.entries()) {
 				const target = registrations.get(dependency);
 				if (!target) {
 					throw new Error(
 						`Missing service dependency: ${service.name} -> ${dependency.name}`,
 					);
 				}
+				const declaration = service.implementation.valueDeclaration;
+				const constructor =
+					declaration && ts.isClassDeclaration(declaration)
+						? declaration.members.find(ts.isConstructorDeclaration)
+						: undefined;
+				const parameter = constructor?.parameters[index];
+				if (
+					parameter &&
+					!this.checker.isTypeAssignableTo(
+						this.checker.getDeclaredTypeOfSymbol(target.implementation),
+						this.checker.getTypeAtLocation(parameter),
+					)
+				) {
+					throw new Error(
+						`Service dependency type mismatch: ${service.name}.${parameter.name.getText()} -> ${target.name}`,
+					);
+				}
+
 				walk(target, [...path, service], singleton || service.lifetime === "singleton");
 			}
 			visited.add(service);

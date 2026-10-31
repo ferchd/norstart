@@ -28,6 +28,7 @@ export async function buildApplication(
 	const manifest = await compileApplication({
 		rootDirectory,
 		configPath: options.configPath,
+		entry: options.entry,
 	});
 	const bootstrap = resolve(dirname(manifest.manifestPath), "bootstrap.ts");
 	if (entry === bootstrap) {
