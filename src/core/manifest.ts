@@ -18,7 +18,12 @@ export function createManifest(
 			}),
 	);
 
-	return Object.freeze({ schemaVersion: 1, frameworkVersion, profiles: Object.freeze(profiles) });
+	return Object.freeze({
+		schemaVersion: 2,
+		frameworkVersion,
+		serviceModules: Object.freeze([...config.application.serviceModules]),
+		profiles: Object.freeze(profiles),
+	});
 }
 
 export class ProfileRegistry {

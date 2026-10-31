@@ -1,8 +1,13 @@
-import type { ServiceContainer, ServiceResolver, ServiceScope, ServiceToken } from "./contracts.ts";
+import type {
+	ServiceContainer,
+	ServiceLifetime,
+	ServiceResolver,
+	ServiceScope,
+	ServiceToken,
+} from "./contracts.ts";
 
 type Factory<T> = (resolver: ServiceResolver) => T;
-type Lifetime = "singleton" | "transient" | "scoped";
-type Registration = { factory: Factory<unknown>; lifetime: Lifetime };
+type Registration = { factory: Factory<unknown>; lifetime: ServiceLifetime };
 type Disposable = { dispose(): void | Promise<void> };
 
 export class CircularDependencyError extends Error {
@@ -25,7 +30,7 @@ export class Container implements ServiceContainer {
 	register<T>(
 		token: ServiceToken<T>,
 		factory: Factory<T>,
-		lifetime: Lifetime = "transient",
+		lifetime: ServiceLifetime = "transient",
 	): this {
 		this.assertActive();
 

@@ -14,9 +14,12 @@ Profiles are described by named `[profiles.<id>]` TOML tables. A `ProfileDriver`
 
 ## HTTP profile
 
-The public package entry point registers the HTTP profile automatically. Configure route modules in TOML:
+The public package entry point registers the HTTP profile automatically. Configure service modules and route modules in TOML:
 
 ```toml
+[application]
+serviceModules = ["src/services.ts"]
+
 [profiles.http]
 type = "http-server"
 port = 3000
@@ -42,18 +45,9 @@ import { Application } from "norstar";
 Application.configure().create().run();
 ```
 
-Handlers may return a `Response`, string, JSON-serializable value, or `undefined`. Class controller targets use `[Controller, "method"]`; register controllers and their dependencies with the `configureServices` callback. Request scopes are disposed after the response body completes or is cancelled. `HttpError` 4xx messages are exposed by default; 5xx errors return a generic message unless created with `{ expose: true }`. Shutdown drains active requests and force-closes the server only when the Kernel's shutdown deadline expires.
+Handlers may return a `Response`, string, JSON-serializable value, or `undefined`. Class controller targets use `[Controller, "method"]`. Export service classes from configured modules with `static norstarService` metadata containing `lifetime` and constructor `inject` tokens; Norstar loads that manifest before profile bootstrap. Request scopes are disposed after the response body completes or is cancelled. `HttpError` 4xx messages are exposed by default; 5xx errors return a generic message unless created with `{ expose: true }`. The application handles `SIGINT` and `SIGTERM`, drains active requests and force-closes the server only when the Kernel's shutdown deadline expires.
 
 The HTTP demo includes a local throughput comparison with a native `Bun.serve()` endpoint. Run it with `bun run benchmark:http`; results depend on the machine and environment.
-
-```toml
-[application]
-name = "my-app"
-
-[profiles.api]
-type = "http-server"
-port = 3000
-```
 
 ## Acceptance checks
 

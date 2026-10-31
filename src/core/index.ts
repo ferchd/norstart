@@ -16,6 +16,7 @@ export type {
 	ProfileRegistration,
 	RunResult,
 	ServiceContainer,
+	ServiceLifetime,
 	ServiceResolver,
 	ServiceScope,
 	ServiceToken,

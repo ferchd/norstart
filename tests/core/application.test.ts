@@ -50,6 +50,34 @@ describe("Application", () => {
 		});
 	});
 
+	test("stops on process signals and removes signal listeners after run", async () => {
+		await withTemporaryDirectory(async (directory) => {
+			const configPath = await createConfig(directory);
+			const started = deferred();
+			const finished = deferred();
+			const driver: ProfileDriver = {
+				type: "test",
+				create: () => createInstance(started, finished, () => finished.resolve()),
+			};
+			const application = Application.configure({ configPath, drivers: [driver] }).create();
+			const initialInterruptListeners = process.listenerCount("SIGINT");
+			const initialTerminateListeners = process.listenerCount("SIGTERM");
+			const run = application.run();
+
+			await started.promise;
+			expect(process.listenerCount("SIGINT")).toBe(initialInterruptListeners + 1);
+			expect(process.listenerCount("SIGTERM")).toBe(initialTerminateListeners + 1);
+			process.emit("SIGTERM");
+
+			const result = await run;
+
+			expect(result.status).toBe("stopped");
+			expect(result.reason).toBe("signal");
+			expect(process.listenerCount("SIGINT")).toBe(initialInterruptListeners);
+			expect(process.listenerCount("SIGTERM")).toBe(initialTerminateListeners);
+		});
+	});
+
 	test("does not start profiles when stopped during bootstrap", async () => {
 		await withTemporaryDirectory(async (directory) => {
 			const configPath = await createConfig(directory);

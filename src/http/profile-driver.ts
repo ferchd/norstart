@@ -43,7 +43,8 @@ export class HttpProfileInstance implements ProfileInstance {
 		this.server = Bun.serve({
 			hostname: this.configuration.hostname,
 			port: this.configuration.port,
-			fetch: (request) => this.router.handle(request, this.context.createScope),
+			routes: this.router.createBunRoutes(this.context.createScope),
+			fetch: () => this.router.handleNotFound(this.context.createScope),
 		});
 	}
 
