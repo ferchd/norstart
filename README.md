@@ -19,6 +19,7 @@ The public package entry point registers the HTTP profile automatically. Configu
 ```toml
 [application]
 serviceModules = ["src/services.ts"]
+profileDrivers = ["@acme/norstar-worker"]
 
 [profiles.http]
 type = "http-server"
@@ -44,6 +45,8 @@ import { Application } from "norstar";
 
 Application.configure().create().run();
 ```
+
+Each module listed in `profileDrivers` must default-export one `ProfileDriver`. `norstar check` resolves the modules without evaluating them, and `norstar build` and `norstar dev` statically include them in the generated application. Install each driver package in the application before running these commands. For direct, uncompiled runtime use, pass drivers through `Application.configure({ drivers })` because creating an application remains synchronous.
 
 Handlers may return a `Response`, string, JSON-serializable value, or `undefined`. Class controller targets use `[Controller, "method"]`. Export service classes from configured modules with `static norstarService` metadata containing `lifetime` and constructor `inject` tokens; Norstar loads that manifest before profile bootstrap. Request scopes are disposed after the response body completes or is cancelled. `HttpError` 4xx messages are exposed by default; 5xx errors return a generic message unless created with `{ expose: true }`. The application handles `SIGINT` and `SIGTERM`, drains active requests and force-closes the server only when the Kernel's shutdown deadline expires.
 

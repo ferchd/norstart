@@ -49,7 +49,12 @@ await Application.configure({ drivers: [{
 		);
 		await operation(directory);
 	} finally {
-		await rm(directory, { recursive: true, force: true });
+		await rm(directory, {
+			recursive: true,
+			force: true,
+			maxRetries: 5,
+			retryDelay: 100,
+		});
 	}
 }
 
@@ -339,6 +344,115 @@ console.log(process.cwd());
 			expect(await readFile(join(directory, "evaluated.txt"), "utf8")).toBe("evaluated\n");
 		});
 	}, 20000);
+
+	test("loads a config-declared external driver into the standalone build", async () => {
+		const directory = await mkdtemp(join(tmpdir(), "norstar-external-driver-"));
+		try {
+			const packageDirectory = join(directory, "vendor", "@norstar-test", "external-driver");
+			await mkdir(join(directory, "src"));
+			await mkdir(packageDirectory, { recursive: true });
+			await writeFile(
+				join(packageDirectory, "package.json"),
+				JSON.stringify({
+					name: "@norstar-test/external-driver",
+					type: "module",
+					exports: { import: "./index.js" },
+				}),
+			);
+			await writeFile(
+				join(directory, "package.json"),
+				JSON.stringify({
+					private: true,
+					dependencies: {
+						"@norstar-test/external-driver":
+							"file:vendor/@norstar-test/external-driver",
+					},
+				}),
+			);
+			await writeFile(
+				join(directory, "tsconfig.json"),
+				JSON.stringify({
+					compilerOptions: {
+						paths: {
+							norstar: [join(repository, "src/index.ts")],
+							"norstar/*": [join(repository, "src/*")],
+						},
+					},
+				}),
+			);
+			await writeFile(
+				join(packageDirectory, "index.js"),
+				`import { appendFileSync } from "node:fs";
+appendFileSync(${JSON.stringify(join(directory, "driver-loaded.txt"))}, "loaded\\n");
+
+export default {
+	type: "external-job",
+	create() {
+		return {
+			mode: "finite",
+			finished: new Promise((resolve) => queueMicrotask(resolve)),
+			start() {
+				console.log("external driver started");
+			},
+			stop() {
+				appendFileSync(${JSON.stringify(join(directory, "driver-stopped.txt"))}, "stopped\\n");
+			},
+		};
+	},
+};
+`,
+			);
+			const installed = await executeCommand(
+				[process.execPath, "install", "--ignore-scripts", "--backend=copyfile"],
+				directory,
+			);
+			if (installed.exitCode !== 0) {
+				throw new Error(
+					`External driver install failed:\n${installed.stdout}${installed.stderr}`,
+				);
+			}
+			await writeFile(
+				join(directory, "framework.toml"),
+				'[application]\nprofileDrivers = ["@norstar-test/external-driver"]\n\n[profiles.job]\ntype = "external-job"\n',
+			);
+			await writeFile(
+				join(directory, "src/main.ts"),
+				'import { Application } from "norstar";\nawait Application.configure().create().run();\n',
+			);
+
+			const checked = await execute(["check"], directory);
+			if (checked.exitCode !== 0) {
+				throw new Error(
+					`External driver check failed:\n${checked.stdout}${checked.stderr}`,
+				);
+			}
+			expect(checked.exitCode).toBe(0);
+			expect(await Bun.file(join(directory, "driver-loaded.txt")).exists()).toBe(false);
+			const built = await execute(["build"], directory);
+			if (built.exitCode !== 0) {
+				throw new Error(`External driver build failed:\n${built.stdout}${built.stderr}`);
+			}
+			expect(built.exitCode).toBe(0);
+			expect(await Bun.file(join(directory, "driver-loaded.txt")).exists()).toBe(false);
+
+			await rm(join(directory, "src"), { recursive: true });
+			await rm(join(directory, "framework.toml"));
+			await rm(join(directory, ".norstar"), { recursive: true });
+			await rm(join(directory, "node_modules"), { recursive: true });
+			const artifact = await executeCommand(
+				[process.execPath, join(directory, "dist/main.js")],
+				directory,
+			);
+
+			expect(artifact.exitCode).toBe(0);
+			expect(artifact.stderr).toBe("");
+			expect(artifact.stdout).toContain("external driver started");
+			expect(await Bun.file(join(directory, "driver-loaded.txt")).text()).toBe("loaded\n");
+			expect(await Bun.file(join(directory, "driver-stopped.txt")).text()).toBe("stopped\n");
+		} finally {
+			await rm(directory, { recursive: true, force: true });
+		}
+	}, 30000);
 
 	test("invalid commands fail with a nonzero exit status", async () => {
 		const result = await execute(["unknown"], process.cwd());

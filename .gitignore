@@ -5,6 +5,7 @@ node_modules/
 out/
 dist/
 .norstar/
+.norstar-*/
 coverage/
 *.tsbuildinfo
 

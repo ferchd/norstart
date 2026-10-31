@@ -62,7 +62,11 @@ export interface ProfileDefinition {
 }
 
 export interface ApplicationConfig {
-	readonly application: Readonly<{ name?: string; serviceModules: readonly string[] }>;
+	readonly application: Readonly<{
+		name?: string;
+		serviceModules: readonly string[];
+		profileDrivers?: readonly string[];
+	}>;
 	readonly profiles: Readonly<Record<string, ProfileDefinition>>;
 }
 
