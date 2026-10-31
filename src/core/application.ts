@@ -15,6 +15,7 @@ export interface ApplicationOptions {
 
 export class Application {
 	private runPromise?: Promise<RunResult>;
+	private readonly serviceLoadingAbort = new AbortController();
 	private readonly signalHandlers = new Map<"SIGINT" | "SIGTERM", () => void>();
 
 	constructor(
@@ -56,12 +57,19 @@ export class Application {
 	}
 
 	stop(reason: StopReason = "requested"): Promise<RunResult> {
+		this.serviceLoadingAbort.abort(reason);
+
 		return this.kernel.stop(reason);
 	}
 
 	private async execute(): Promise<RunResult> {
 		try {
-			await registerServiceModules(this.serviceModules, this.services);
+			const signal = this.serviceLoadingAbort.signal;
+			await registerServiceModules(this.serviceModules, this.services, signal);
+			if (signal.aborted) {
+				return await this.kernel.stop();
+			}
+
 			await this.kernel.bootstrap();
 			await this.kernel.start();
 
