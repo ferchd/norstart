@@ -9,3 +9,4 @@ export type {
 	HttpRouteHandler,
 	HttpRouteTarget,
 } from "./router.ts";
+export { beginCompiledRoutes, finishCompiledRoutes } from "./router.ts";

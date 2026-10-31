@@ -43,4 +43,5 @@ export type {
 	ServiceScope,
 	ServiceToken,
 	StopReason,
+	CompiledApplicationDefinition,
 } from "./core/index.ts";

@@ -67,11 +67,17 @@ The contract tests cover configuration and manifest creation, finite and persist
 - Codex reads project instructions from `AGENTS.md`, loads project-scoped agents from `.codex/agents/` and skills from `.agents/skills/`, and runs project hooks after edits and before finishing a turn. Project-local hooks must be reviewed and trusted in Codex before they execute.
 - GitHub Actions runs the same quality gate on pushes and pull requests. CodeQL scans the TypeScript and workflow code; Dependabot tracks Bun dependencies and GitHub Actions.
 
-## Discovery and compilation status
+## Compiler and CLI
 
-Service discovery currently imports explicitly configured modules during `run()` and reads their static `norstarService` metadata. The manifest is built from TOML at runtime. Stopping during service loading cancels registration and lets shutdown finish without waiting for module evaluation; JavaScript module side effects already in progress cannot be cancelled.
+Run `norstar check`, `norstar build`, or `norstar dev` from an application directory. In this checkout use `bun run norstar <command>`. The CLI accepts `--config framework.toml`, `--entry src/main.ts`, and `--outdir dist`.
 
-The next compiler and CLI milestone remains open. Its acceptance criteria are convention-based service and controller discovery, a generated static manifest, dependency and lifetime validation before execution, and application startup from that artifact through `Application.configure().create().run()`. It must preserve the transport-agnostic Kernel and keep examples isolated.
+The compiler discovers exported classes in `src/**/*.service.ts` and `src/**/*.controller.ts`, infers constructor dependencies from class types, and validates missing registrations, circular dependencies, and singleton dependencies on scoped services. Controllers default to scoped lifetime; services default to transient. Explicit `static norstarService` metadata overrides these defaults. Configure `[application].discovery` with an array of glob patterns or use `serviceModules` for explicit modules.
+
+`check` analyzes source without evaluating application modules or writing artifacts. `build` generates `.norstar/manifest.ts` with static references, includes configured HTTP routes, and bundles a production entry in `dist/`. The bundle retains `Application.configure().create().run()` and runs without the original source files, directory scanning, or TOML parsing. `dev` recompiles and restarts on source and configuration changes. See [the compiled example](examples/compiled-app/README.md).
+
+This initial compiler requires concrete classes without inheritance, class-typed constructor dependencies or explicit static injection arrays, and class or exported `Symbol()` tokens. Dynamic metadata, `Symbol.for()` tokens, top-level await in configured route dependency graphs, TOML dates, and non-finite configuration numbers produce diagnostics. TypeScript typechecking remains a separate project check. Interactive project creation is a later CLI extension.
+
+The explicit runtime loader remains available for development integrations. Stopping during service loading cancels registration and lets shutdown finish without waiting for module evaluation; JavaScript module side effects already in progress cannot be cancelled. The Kernel has no dependency on the compiler or CLI.
 
 ## Project policies
 
