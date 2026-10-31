@@ -69,7 +69,7 @@ The contract tests cover configuration and manifest creation, finite and persist
 
 ## Compiler and CLI
 
-Run `norstar init my-app` to create a minimal HTTP application, then run `bun install` and `bun run dev` in the new directory. Initialization is non-interactive and refuses to overwrite a non-empty target. Use `--framework <specifier>` to select a local tarball, checkout, or published Norstar version.
+Run `norstar init my-app` to create a minimal HTTP application, then run `bun install` and `bun run dev` in the new directory. Initialization is non-interactive, publishes the generated tree atomically, and refuses to overwrite a non-empty target. Private Norstar installations require `--framework <specifier>` to select a stable local tarball or checkout; published packages use their own version by default.
 
 Run `norstar check`, `norstar build`, or `norstar dev` from an application directory. In this checkout use `bun run norstar <command>`. The CLI accepts `--config framework.toml`, `--entry src/main.ts`, and `--outdir dist`.
 
