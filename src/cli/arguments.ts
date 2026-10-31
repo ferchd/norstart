@@ -1,16 +1,25 @@
-export interface CliOptions {
+export interface ApplicationCliOptions {
 	readonly command: "check" | "build" | "dev";
 	readonly configPath: string;
 	readonly entry: string;
 	readonly outdir: string;
 }
 
+export interface InitCliOptions {
+	readonly command: "init";
+	readonly directory: string;
+	readonly framework?: string;
+}
+
+export type CliOptions = ApplicationCliOptions | InitCliOptions;
+
 export function parseArguments(arguments_: readonly string[]): CliOptions {
 	const [command, ...rest] = arguments_;
+	if (command === "init") {
+		return parseInitArguments(rest);
+	}
 	if (command !== "check" && command !== "build" && command !== "dev") {
-		throw new Error(
-			"Usage: norstar <check|build|dev> [--config framework.toml] [--entry src/main.ts] [--outdir dist]",
-		);
+		throw new Error("Usage: norstar <init|check|build|dev> [options]");
 	}
 
 	const options = { command, configPath: "framework.toml", entry: "src/main.ts", outdir: "dist" };
@@ -39,4 +48,37 @@ export function parseArguments(arguments_: readonly string[]): CliOptions {
 	}
 
 	return options as CliOptions;
+}
+
+function parseInitArguments(arguments_: readonly string[]): InitCliOptions {
+	let directory = ".";
+	let framework: string | undefined;
+	let directorySet = false;
+	for (let index = 0; index < arguments_.length; index++) {
+		const argument = arguments_[index];
+		if (argument === "--framework") {
+			const value = arguments_[index + 1];
+			if (!value || value.startsWith("--")) {
+				throw new Error("Missing value for --framework");
+			}
+			if (framework !== undefined) {
+				throw new Error("Duplicate option: --framework");
+			}
+
+			framework = value;
+			index++;
+			continue;
+		}
+		if (argument?.startsWith("--")) {
+			throw new Error(`Unknown option: ${argument}`);
+		}
+		if (!argument || directorySet) {
+			throw new Error("Usage: norstar init [directory] [--framework <specifier>]");
+		}
+
+		directory = argument;
+		directorySet = true;
+	}
+
+	return { command: "init", directory, framework };
 }

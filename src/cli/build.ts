@@ -1,6 +1,6 @@
 import { writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, parse, relative, resolve, sep } from "node:path";
-import type { CliOptions } from "./arguments.ts";
+import type { ApplicationCliOptions } from "./arguments.ts";
 import { compileApplication } from "../compiler/index.ts";
 import { quoteCodeString } from "../compiler/code-string.ts";
 
@@ -11,7 +11,7 @@ function importPath(from: string, target: string): string {
 }
 
 export async function buildApplication(
-	options: CliOptions,
+	options: ApplicationCliOptions,
 	rootDirectory: string,
 ): Promise<string> {
 	const entry = resolve(rootDirectory, options.entry);

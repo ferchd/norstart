@@ -1,11 +1,11 @@
 import { watch } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
-import type { CliOptions } from "./arguments.ts";
+import type { ApplicationCliOptions } from "./arguments.ts";
 import { buildApplication } from "./build.ts";
 import { reportCliError } from "./diagnostics.ts";
 
 export async function developApplication(
-	options: CliOptions,
+	options: ApplicationCliOptions,
 	rootDirectory: string,
 ): Promise<void> {
 	let child: ReturnType<typeof Bun.spawn> | undefined;
