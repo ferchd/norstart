@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { checkApplication, compileApplication } from "../../src/compiler/index.ts";
 import { withTemporaryDirectory } from "../core/helpers.ts";
@@ -55,6 +55,34 @@ test("honors tsconfig strictness and includes configured application roots", asy
 		await checkApplication({ rootDirectory: directory });
 		await writeConfig(true);
 		await expect(checkApplication({ rootDirectory: directory })).rejects.toThrow("TS2322");
+	});
+}, 20000);
+
+test("ignores stale generated artifacts during checks and recompilation", async () => {
+	await withTemporaryDirectory(async (directory) => {
+		for (const outFile of [undefined, "generated/application.ts"]) {
+			const project = join(directory, outFile === undefined ? "default" : "custom");
+			await mkdir(project);
+			await createProject(project);
+			await writeFile(
+				join(project, "tsconfig.json"),
+				JSON.stringify({ include: ["**/*.ts"] }),
+			);
+			await compileApplication({ rootDirectory: project, outFile });
+
+			await rename(
+				join(project, "src", "store.service.ts"),
+				join(project, "src", "catalog.service.ts"),
+			);
+			await writeFile(join(project, "src", "catalog.service.ts"), "export class Catalog {}");
+
+			await checkApplication({ rootDirectory: project, outFile });
+			const { manifestPath } = await compileApplication({ rootDirectory: project, outFile });
+			const manifest = await Bun.file(manifestPath).text();
+
+			expect(manifest).toContain("catalog.service.ts");
+			expect(manifest).not.toContain("store.service.ts");
+		}
 	});
 }, 20000);
 

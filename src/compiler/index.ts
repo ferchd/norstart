@@ -5,7 +5,7 @@ import { createManifest } from "../core/manifest.ts";
 import type { ApplicationConfig } from "../core/contracts.ts";
 import { ServiceAnalyzer } from "./analyzer.ts";
 import { quoteCodeString } from "./code-string.ts";
-import { readApplicationProject, validateApplicationTypes } from "./project.ts";
+import { isGeneratedFile, readApplicationProject, validateApplicationTypes } from "./project.ts";
 
 export interface CompilerOptions {
 	readonly entry?: string;
@@ -29,6 +29,7 @@ interface Analysis {
 async function readApplication(options: CompilerOptions): Promise<Analysis> {
 	const root = resolve(options.rootDirectory ?? process.cwd());
 	const configPath = resolve(root, options.configPath ?? "framework.toml");
+	const manifestPath = resolve(root, options.outFile ?? ".norstar/manifest.ts");
 	const source = await readFile(configPath, "utf8");
 	const config = parseConfiguration(source);
 	const raw = Bun.TOML.parse(source) as { application?: { discovery?: unknown } };
@@ -49,6 +50,10 @@ async function readApplication(options: CompilerOptions): Promise<Analysis> {
 			absolute: true,
 			onlyFiles: true,
 		})) {
+			if (isGeneratedFile(root, manifestPath, file)) {
+				continue;
+			}
+
 			files.add(resolve(file));
 		}
 	}
@@ -84,7 +89,7 @@ async function readApplication(options: CompilerOptions): Promise<Analysis> {
 		config,
 		files: [...files].sort(),
 		routeFiles: [...routeFiles].sort(),
-		manifestPath: resolve(root, options.outFile ?? ".norstar/manifest.ts"),
+		manifestPath,
 	};
 }
 
@@ -100,7 +105,11 @@ async function analyze(options: CompilerOptions) {
 	if (options.entry) {
 		explicitFiles.push(resolve(application.root, options.entry));
 	}
-	const project = readApplicationProject(application.root, explicitFiles);
+	const project = readApplicationProject(
+		application.root,
+		explicitFiles,
+		application.manifestPath,
+	);
 	const analyzer = new ServiceAnalyzer(project.files, project.options, application.root);
 	analyzer.validateRouteModules(application.routeFiles);
 	const services = analyzer.analyze(application.files);

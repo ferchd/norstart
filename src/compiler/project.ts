@@ -10,6 +10,7 @@ export interface ApplicationProject {
 export function readApplicationProject(
 	root: string,
 	explicitFiles: readonly string[],
+	manifestPath: string,
 ): ApplicationProject {
 	const configPath = resolve(root, "tsconfig.json");
 	let files: readonly string[];
@@ -29,7 +30,7 @@ export function readApplicationProject(
 			configPath,
 		);
 		throwDiagnostics(parsed.errors, root);
-		files = parsed.fileNames;
+		files = parsed.fileNames.filter((file) => !isGeneratedFile(root, manifestPath, file));
 		options = parsed.options;
 	} else {
 		files = ts.sys.readDirectory(
@@ -66,6 +67,30 @@ export function readApplicationProject(
 			noEmit: true,
 		},
 	};
+}
+
+export function isGeneratedFile(root: string, manifestPath: string, file: string): boolean {
+	const path = relative(resolve(root, ".norstar"), resolve(file));
+	if (!isAbsolute(path) && path !== ".." && !path.startsWith(`..${sep}`)) {
+		return true;
+	}
+
+	const output = normalizePath(manifestPath);
+	const candidate = normalizePath(file);
+	if (candidate === output) {
+		return true;
+	}
+	if (!candidate.startsWith(output)) {
+		return false;
+	}
+
+	return /^\.route-\d+(?:\.prelude)?\.ts$/.test(candidate.slice(output.length));
+}
+
+function normalizePath(path: string): string {
+	const normalized = resolve(path);
+
+	return ts.sys.useCaseSensitiveFileNames ? normalized : normalized.toLowerCase();
 }
 
 export function validateApplicationTypes(
