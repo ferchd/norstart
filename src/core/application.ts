@@ -112,6 +112,19 @@ class ConfiguredApplication {
 		}
 
 		const config = compiled?.config ?? loadConfigurationSync(this.options.configPath);
+		const drivers = [...(this.options.drivers ?? []), ...(compiled?.drivers ?? [])];
+		for (const driver of drivers) {
+			if (
+				!driver ||
+				typeof driver.type !== "string" ||
+				!driver.type.trim() ||
+				typeof driver.create !== "function"
+			) {
+				throw new Error(
+					"Compiled profile driver modules must default-export a ProfileDriver",
+				);
+			}
+		}
 		const services = new Container();
 		compiled?.registerServices(services);
 		this.options.configureServices?.(services);
@@ -120,7 +133,7 @@ class ConfiguredApplication {
 		const kernel = new Kernel({
 			config,
 			manifest,
-			drivers: this.options.drivers ?? [],
+			drivers,
 			services,
 			shutdownTimeoutMs: this.options.shutdownTimeoutMs,
 		});

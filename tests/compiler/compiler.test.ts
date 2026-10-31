@@ -14,6 +14,20 @@ async function fixture(directory: string, services: string, discovery?: string[]
 }
 
 describe("static application compiler", () => {
+	test("reports a missing declared profile driver module", async () => {
+		await withTemporaryDirectory(async (directory) => {
+			await fixture(directory, "export class Store {}");
+			await writeFile(
+				join(directory, "framework.toml"),
+				'[application]\nprofileDrivers = ["missing-profile-driver"]\n\n[profiles.job]\ntype = "worker"',
+			);
+
+			await expect(checkApplication({ rootDirectory: directory })).rejects.toThrow(
+				"Profile driver module not found: missing-profile-driver",
+			);
+		});
+	}, 20000);
+
 	test("discovers constructor dependencies without evaluating modules or writing artifacts during check", async () => {
 		await withTemporaryDirectory(async (directory) => {
 			await fixture(

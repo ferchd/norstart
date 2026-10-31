@@ -5,3 +5,4 @@ dist/
 coverage/
 bun.lock
 .norstar/
+.norstar-*/

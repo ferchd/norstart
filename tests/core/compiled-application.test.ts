@@ -3,6 +3,7 @@ import { Application } from "../../src/core/application.ts";
 import { parseConfiguration } from "../../src/core/configuration.ts";
 import { createManifest } from "../../src/core/manifest.ts";
 import type { CompiledApplicationDefinition } from "../../src/core/compiled-application.ts";
+import type { ProfileDriver } from "../../src/core/contracts.ts";
 
 test("runs a compiled application without loading configuration or service modules", async () => {
 	const config = parseConfiguration(
@@ -25,9 +26,6 @@ test("runs a compiled application without loading configuration or service modul
 				"singleton",
 			);
 		},
-	};
-	const application = Application.configure({
-		compiled: definition,
 		drivers: [
 			{
 				type: "compiled-job",
@@ -44,12 +42,18 @@ test("runs a compiled application without loading configuration or service modul
 				},
 			},
 		],
-	}).create();
+	};
+	const application = Application.configure({ compiled: definition }).create();
 	expect(profileCreations).toBe(0);
 	expect(serviceCreations).toBe(0);
 	expect((await application.run()).status).toBe("completed");
 	expect(profileCreations).toBe(1);
 	expect(serviceCreations).toBe(1);
+	const invalidDriver = {} as ProfileDriver;
+	const invalidDefinition = { ...definition, drivers: [invalidDriver] };
+	expect(() => Application.configure({ compiled: invalidDefinition }).create()).toThrow(
+		"must default-export a ProfileDriver",
+	);
 	expect(() =>
 		Application.configure({ compiled: definition, configPath: "override.toml" }).create(),
 	).toThrow("cannot override");

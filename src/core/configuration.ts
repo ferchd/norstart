@@ -21,6 +21,7 @@ export function parseConfiguration(source: string): ApplicationConfig {
 		throw new Error("[application] must be a table");
 	}
 	const serviceModules = readServiceModules(application.serviceModules);
+	const profileDrivers = readProfileDrivers(application.profileDrivers);
 	const rawProfiles = parsed.profiles;
 	if (!isRecord(rawProfiles) || Object.keys(rawProfiles).length === 0) {
 		throw new Error("framework.toml must define at least one [profiles.<name>] table");
@@ -44,8 +45,28 @@ export function parseConfiguration(source: string): ApplicationConfig {
 		application: Object.freeze({
 			name: typeof application.name === "string" ? application.name : undefined,
 			serviceModules: Object.freeze(serviceModules),
+			profileDrivers: Object.freeze(profileDrivers),
 		}),
 		profiles: Object.freeze(profiles),
+	});
+}
+
+function readProfileDrivers(value: unknown): string[] {
+	if (value === undefined) {
+		return [];
+	}
+	if (!Array.isArray(value)) {
+		throw new Error("[application].profileDrivers must be an array of module specifiers");
+	}
+
+	return value.map((specifier, index) => {
+		if (typeof specifier !== "string" || !specifier.trim()) {
+			throw new Error(
+				`[application].profileDrivers[${index}] must be a non-empty module specifier`,
+			);
+		}
+
+		return specifier;
 	});
 }
 

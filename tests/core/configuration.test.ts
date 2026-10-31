@@ -16,6 +16,7 @@ describe("Configuration", () => {
 
 		expect(configuration.application.name).toBe("norstar");
 		expect(configuration.application.serviceModules).toEqual([]);
+		expect(configuration.application.profileDrivers).toEqual([]);
 		expect(configuration.profiles.api?.type).toBe("http-server");
 		expect(configuration.profiles.api?.config).toEqual({ port: 3000 });
 		expect(Object.isFrozen(configuration)).toBe(true);
@@ -28,6 +29,26 @@ describe("Configuration", () => {
 
 		expect(configuration.application.name).toBeUndefined();
 		expect(configuration.application.serviceModules).toEqual([]);
+		expect(configuration.application.profileDrivers).toEqual([]);
+	});
+
+	test("validates and freezes configured profile driver modules", () => {
+		const configuration = parseConfiguration(
+			'[application]\nprofileDrivers = ["@norstar/worker"]\n[profiles.job]\ntype = "worker"',
+		);
+
+		expect(configuration.application.profileDrivers).toEqual(["@norstar/worker"]);
+		expect(Object.isFrozen(configuration.application.profileDrivers)).toBe(true);
+		expect(() =>
+			parseConfiguration(
+				'[application]\nprofileDrivers = "@norstar/worker"\n[profiles.job]\ntype = "worker"',
+			),
+		).toThrow("must be an array of module specifiers");
+		expect(() =>
+			parseConfiguration(
+				'[application]\nprofileDrivers = [""]\n[profiles.job]\ntype = "worker"',
+			),
+		).toThrow("must be a non-empty module specifier");
 	});
 
 	test("validates and freezes configured service modules", () => {

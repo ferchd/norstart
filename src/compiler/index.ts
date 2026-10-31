@@ -105,17 +105,38 @@ async function analyze(options: CompilerOptions) {
 	if (options.entry) {
 		explicitFiles.push(resolve(application.root, options.entry));
 	}
-	const project = readApplicationProject(
+	const driverFiles: string[] = [];
+	for (const specifier of application.config.application.profileDrivers ?? []) {
+		const moduleFile = resolveDriverModule(specifier, application.root);
+		if (!moduleFile) {
+			throw new Error(`Profile driver module not found: ${specifier}`);
+		}
+		explicitFiles.push(moduleFile);
+		driverFiles.push(moduleFile);
+	}
+	const completeProject = readApplicationProject(
 		application.root,
 		explicitFiles,
 		application.manifestPath,
 	);
-	const analyzer = new ServiceAnalyzer(project.files, project.options, application.root);
+	const analyzer = new ServiceAnalyzer(
+		completeProject.files,
+		completeProject.options,
+		application.root,
+	);
 	analyzer.validateRouteModules(application.routeFiles);
 	const services = analyzer.analyze(application.files);
-	validateApplicationTypes(analyzer.program, application.root, project.files);
+	validateApplicationTypes(analyzer.program, application.root, completeProject.files);
 
-	return { ...application, analyzer, services };
+	return { ...application, analyzer, services, driverFiles };
+}
+
+function resolveDriverModule(specifier: string, root: string): string | undefined {
+	try {
+		return Bun.resolveSync(specifier, root);
+	} catch {
+		return undefined;
+	}
 }
 
 export async function checkApplication(options: CompilerOptions = {}): Promise<CompilationResult> {
@@ -165,6 +186,14 @@ export async function compileApplication(
 			"\t\t);",
 		].join("\n");
 	});
+	const profileDriverImports = application.driverFiles.map((driverFile, index) => {
+		const source = importPath(manifestPath, driverFile);
+
+		return {
+			alias: `profileDriver${index}`,
+			path: quoteCodeString(source),
+		};
+	});
 	const profiles: Record<string, { type: string; config: Readonly<Record<string, unknown>> }> =
 		Object.create(null);
 	const routeImports: string[] = [];
@@ -210,11 +239,16 @@ export async function compileApplication(
 		profiles[id] = { type: profile.type, config: { ...profile.config, routes } };
 	}
 	const config: ApplicationConfig = {
-		application: { name: application.config.application.name, serviceModules: [] },
+		application: {
+			name: application.config.application.name,
+			serviceModules: [],
+			profileDrivers: application.config.application.profileDrivers ?? [],
+		},
 		profiles,
 	};
 	const manifest = createManifest(config);
 	const lines = [
+		...profileDriverImports.map(({ alias, path }) => `import * as ${alias} from ${path};`),
 		...routeImports,
 		'import type { CompiledApplicationDefinition } from "norstar/core";',
 		...[...imports].map(
@@ -225,6 +259,7 @@ export async function compileApplication(
 		`const definition: CompiledApplicationDefinition = {`,
 		`\tconfig: ${frozenLiteral(config, 1)},`,
 		`\tmanifest: ${frozenLiteral(manifest, 1)},`,
+		`\tdrivers: Object.freeze([${profileDriverImports.map(({ alias }) => `${alias}.default`).join(", ")}]),`,
 		"",
 		`\tregisterServices(services) {`,
 		registrations.join("\n\n"),
