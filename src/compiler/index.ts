@@ -129,7 +129,23 @@ export async function compileApplication(
 			(dependency) => `resolver.get(${reference(dependency)})`,
 		);
 
-		return `services.register(${token}, (resolver) => new ${implementation}(${dependencies.join(", ")}), ${JSON.stringify(service.lifetime)});`;
+		let factory = `\t\t\t() => new ${implementation}(),`;
+		if (dependencies.length > 0) {
+			factory = [
+				"\t\t\t(resolver) =>",
+				`\t\t\t\tnew ${implementation}(`,
+				...dependencies.map((dependency) => `\t\t\t\t\t${dependency},`),
+				"\t\t\t\t),",
+			].join("\n");
+		}
+
+		return [
+			"\t\tservices.register(",
+			`\t\t\t${token},`,
+			factory,
+			`\t\t\t${JSON.stringify(service.lifetime)},`,
+			"\t\t);",
+		].join("\n");
 	});
 	const profiles: Record<string, { type: string; config: Readonly<Record<string, unknown>> }> =
 		Object.create(null);
@@ -162,11 +178,11 @@ export async function compileApplication(
 				await mkdir(dirname(manifestPath), { recursive: true });
 				await writeFile(
 					preludePath,
-					'import { beginCompiledRoutes } from "norstar/http";\nbeginCompiledRoutes();\n',
+					'import { beginCompiledRoutes } from "norstar/http";\n\nbeginCompiledRoutes();\n',
 				);
 				await writeFile(
 					wrapperPath,
-					`import ${JSON.stringify(importPath(wrapperPath, preludePath))};\nimport ${JSON.stringify(importPath(wrapperPath, absolute))};\nimport { finishCompiledRoutes } from "norstar/http";\nfinishCompiledRoutes(${JSON.stringify(absolute)});\n`,
+					`import ${JSON.stringify(importPath(wrapperPath, preludePath))};\nimport ${JSON.stringify(importPath(wrapperPath, absolute))};\nimport { finishCompiledRoutes } from "norstar/http";\n\nfinishCompiledRoutes(${JSON.stringify(absolute)});\n`,
 				);
 				routeImports.push(
 					`import ${JSON.stringify(importPath(manifestPath, wrapperPath))};`,
@@ -187,13 +203,16 @@ export async function compileApplication(
 			([file, alias]) =>
 				`import * as ${alias} from ${JSON.stringify(importPath(manifestPath, file))};`,
 		),
+		"",
 		`const definition: CompiledApplicationDefinition = {`,
-		`config: ${frozenLiteral(config)},`,
-		`manifest: ${frozenLiteral(manifest)},`,
-		`registerServices(services) {`,
-		...registrations,
-		`},`,
+		`\tconfig: ${frozenLiteral(config, 1)},`,
+		`\tmanifest: ${frozenLiteral(manifest, 1)},`,
+		"",
+		`\tregisterServices(services) {`,
+		registrations.join("\n\n"),
+		`\t},`,
 		`};`,
+		"",
 		`export default definition;`,
 	];
 	await mkdir(dirname(manifestPath), { recursive: true });
@@ -202,7 +221,7 @@ export async function compileApplication(
 	return { manifestPath };
 }
 
-function frozenLiteral(value: unknown): string {
+function frozenLiteral(value: unknown, depth = 0): string {
 	if (value === undefined) {
 		return "undefined";
 	}
@@ -215,15 +234,28 @@ function frozenLiteral(value: unknown): string {
 		return JSON.stringify(value);
 	}
 	if (Array.isArray(value)) {
-		return `Object.freeze([${value.map(frozenLiteral).join(", ")}])`;
+		if (value.length === 0) {
+			return "Object.freeze([])";
+		}
+		const entries = value.map(
+			(entry) => `${"\t".repeat(depth + 1)}${frozenLiteral(entry, depth + 1)},`,
+		);
+
+		return `Object.freeze([\n${entries.join("\n")}\n${"\t".repeat(depth)}])`;
 	}
 	if (
 		typeof value === "object" &&
 		(Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null)
 	) {
-		return `Object.freeze({${Object.entries(value)
-			.map(([key, entry]) => `[${JSON.stringify(key)}]: ${frozenLiteral(entry)}`)
-			.join(", ")}})`;
+		const entries = Object.entries(value).map(
+			([key, entry]) =>
+				`${"\t".repeat(depth + 1)}[${JSON.stringify(key)}]: ${frozenLiteral(entry, depth + 1)},`,
+		);
+		if (entries.length === 0) {
+			return "Object.freeze({})";
+		}
+
+		return `Object.freeze({\n${entries.join("\n")}\n${"\t".repeat(depth)}})`;
 	}
 
 	throw new Error(

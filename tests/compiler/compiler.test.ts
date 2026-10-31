@@ -33,6 +33,8 @@ export class Service {
 			expect(generated).toContain('resolver.get(module0["Store"])');
 			expect(generated).not.toContain("import(");
 			expect(generated).not.toContain("Bun.Glob");
+			expect(generated).toContain("\tconfig: Object.freeze({\n\t\t");
+			expect(generated).toContain("\tregisterServices(services) {\n\t\tservices.register(\n");
 		});
 	});
 
