@@ -1,6 +1,5 @@
-import { lstat, mkdir, readdir, writeFile } from "node:fs/promises";
-import { basename, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { lstat, mkdir, mkdtemp, readdir, rename, rm, rmdir, writeFile } from "node:fs/promises";
+import { basename, dirname, resolve } from "node:path";
 import type { InitCliOptions } from "./arguments.ts";
 
 const files = {
@@ -47,7 +46,7 @@ test("health route reports readiness", () => {
 				noEmit: true,
 				strict: true,
 				target: "ESNext",
-				types: ["bun"],
+				types: ["bun", "node"],
 			},
 			include: ["src/**/*.ts", "tests/**/*.ts"],
 		},
@@ -88,10 +87,6 @@ export async function initializeApplication(
 		throw new Error("Framework specifier must be a non-empty single line");
 	}
 
-	await Promise.all([
-		mkdir(resolve(directory, "src"), { recursive: true }),
-		mkdir(resolve(directory, "tests"), { recursive: true }),
-	]);
 	const packageSource = `${JSON.stringify(
 		{
 			name: packageName(basename(directory)),
@@ -106,19 +101,48 @@ export async function initializeApplication(
 				typecheck: "tsc --noEmit",
 			},
 			dependencies: { norstar: framework },
-			devDependencies: { "@types/bun": "latest", typescript: "^6.0.2" },
+			devDependencies: {
+				"@types/bun": "^1.4.4",
+				"@types/node": "^26.6.6",
+				typescript: "^6.0.2",
+			},
 		},
 		null,
 		2,
 	)}\n`;
+	const parent = dirname(directory);
+	await mkdir(parent, { recursive: true });
+	const staging = await mkdtemp(resolve(parent, `.${basename(directory)}.norstar-`));
+	let removedTarget = false;
+	try {
+		await writeProject(staging, packageSource);
+		if (target) {
+			await rmdir(directory);
+			removedTarget = true;
+		}
+
+		await rename(staging, directory);
+	} catch (error) {
+		if (removedTarget) {
+			await mkdir(directory);
+		}
+
+		throw error;
+	} finally {
+		await rm(staging, { recursive: true, force: true });
+	}
+
+	return directory;
+}
+
+async function writeProject(directory: string, packageSource: string): Promise<void> {
+	await Promise.all([mkdir(resolve(directory, "src")), mkdir(resolve(directory, "tests"))]);
 	await Promise.all([
 		...Object.entries(files).map(([path, source]) =>
 			writeFile(resolve(directory, path), source, { flag: "wx" }),
 		),
 		writeFile(resolve(directory, "package.json"), packageSource, { flag: "wx" }),
 	]);
-
-	return directory;
 }
 
 async function defaultFrameworkSpecifier(): Promise<string> {
@@ -130,7 +154,7 @@ async function defaultFrameworkSpecifier(): Promise<string> {
 		throw new Error("Norstar package version is unavailable");
 	}
 	if (metadata.private === true) {
-		return `file:${fileURLToPath(new URL("../../", import.meta.url))}`;
+		throw new Error("Private Norstar installations require --framework <specifier>");
 	}
 
 	return `^${metadata.version}`;

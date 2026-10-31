@@ -146,6 +146,10 @@ describe("Norstar CLI", () => {
 			expect(await Bun.file(join(application, "tests/health.test.ts")).exists()).toBe(true);
 			const packageSource = await Bun.file(join(application, "package.json")).json();
 			expect(packageSource.dependencies.norstar).toBe(`file:${repository}`);
+			expect(packageSource.devDependencies).toMatchObject({
+				"@types/bun": "^1.4.4",
+				"@types/node": "^26.6.6",
+			});
 
 			const repeated = await execute(
 				["init", "application", "--framework", `file:${repository}`],
@@ -159,6 +163,19 @@ describe("Norstar CLI", () => {
 			expect(fileTarget.exitCode).toBe(1);
 			expect(fileTarget.stderr).toContain("regular directory");
 			expect(await Bun.file(join(directory, "not-a-directory")).text()).toBe("preserve");
+
+			const privateDefault = await execute(["init", "without-framework"], directory);
+			expect(privateDefault.exitCode).toBe(1);
+			expect(privateDefault.stderr).toContain("require --framework");
+			expect(await Bun.file(join(directory, "without-framework")).exists()).toBe(false);
+
+			await mkdir(join(directory, "empty"));
+			const emptyTarget = await execute(
+				["init", "empty", "--framework", `file:${repository}`],
+				directory,
+			);
+			expect(emptyTarget.exitCode).toBe(0);
+			expect(await Bun.file(join(directory, "empty/package.json")).exists()).toBe(true);
 		} finally {
 			await rm(directory, { recursive: true, force: true });
 		}
@@ -187,14 +204,21 @@ describe("Norstar CLI", () => {
 			);
 			expect(runnerInstall.exitCode).toBe(0);
 			const initialized = await executeCommand(
-				[process.execPath, "run", "--no-install", "norstar", "init", application],
+				[
+					process.execPath,
+					"run",
+					"--no-install",
+					"norstar",
+					"init",
+					application,
+					"--framework",
+					`file:${archive}`,
+				],
 				runner,
 			);
 			expect(initialized.exitCode).toBe(0);
 			const generatedPackage = await Bun.file(join(application, "package.json")).json();
-			expect(String(generatedPackage.dependencies.norstar).replaceAll("\\", "/")).toContain(
-				"node_modules/norstar",
-			);
+			expect(generatedPackage.dependencies.norstar).toBe(`file:${archive}`);
 			const reservation = Bun.serve({ port: 0, fetch: () => new Response() });
 			const port = reservation.port;
 			await reservation.stop(true);
