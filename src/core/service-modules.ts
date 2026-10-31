@@ -17,23 +17,54 @@ interface InjectableServiceClass {
 export async function registerServiceModules(
 	modulePaths: readonly string[],
 	services: Container,
+	signal: AbortSignal,
 ): Promise<void> {
 	for (const modulePath of modulePaths) {
+		if (signal.aborted) {
+			return;
+		}
+
 		const absolutePath = resolve(modulePath);
-		let moduleExports: Record<string, unknown>;
+		let moduleExports: Record<string, unknown> | undefined;
+		let onAbort!: () => void;
+		const cancelled = new Promise<undefined>((resolveCancellation) => {
+			onAbort = () => resolveCancellation(undefined);
+			signal.addEventListener("abort", onAbort, { once: true });
+		});
 		try {
-			moduleExports = await import(pathToFileURL(absolutePath).href);
+			moduleExports = await Promise.race([
+				import(pathToFileURL(absolutePath).href),
+				cancelled,
+			]);
 		} catch (cause) {
+			if (signal.aborted) {
+				return;
+			}
+
 			throw new Error(`Unable to load service module "${absolutePath}"`, { cause });
+		} finally {
+			signal.removeEventListener("abort", onAbort);
+		}
+
+		if (signal.aborted || moduleExports === undefined) {
+			return;
 		}
 
 		for (const [exportName, exported] of Object.entries(moduleExports)) {
+			if (signal.aborted) {
+				return;
+			}
+
 			if (!isInjectableServiceClass(exported)) {
 				continue;
 			}
 
 			const definition = readDefinition(exported.norstarService, absolutePath, exportName);
 			const token = definition.token ?? (exported as unknown as ServiceToken<object>);
+			if (signal.aborted) {
+				return;
+			}
+
 			services.register(
 				token,
 				(resolver) => instantiate(exported, definition, resolver),
