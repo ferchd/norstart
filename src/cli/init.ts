@@ -1,4 +1,15 @@
-import { lstat, mkdir, mkdtemp, readdir, rename, rm, rmdir, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import {
+	copyFile,
+	lstat,
+	mkdir,
+	mkdtemp,
+	readdir,
+	rename,
+	rm,
+	rmdir,
+	writeFile,
+} from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import type { InitCliOptions } from "./arguments.ts";
 
@@ -113,26 +124,96 @@ export async function initializeApplication(
 	const parent = dirname(directory);
 	await mkdir(parent, { recursive: true });
 	const staging = await mkdtemp(resolve(parent, `.${basename(directory)}.norstar-`));
-	let removedTarget = false;
 	try {
 		await writeProject(staging, packageSource);
 		if (target) {
-			await rmdir(directory);
-			removedTarget = true;
+			await publishToExistingDirectory(staging, directory);
+		} else {
+			await rename(staging, directory);
 		}
-
-		await rename(staging, directory);
-	} catch (error) {
-		if (removedTarget) {
-			await mkdir(directory);
-		}
-
-		throw error;
 	} finally {
 		await rm(staging, { recursive: true, force: true });
 	}
 
 	return directory;
+}
+
+interface CreatedEntry {
+	readonly path: string;
+	readonly directory: boolean;
+	readonly device: number;
+	readonly inode: number;
+}
+
+export async function publishToExistingDirectory(
+	staging: string,
+	directory: string,
+): Promise<void> {
+	const entries = (await readdir(staging)).sort();
+	const created: CreatedEntry[] = [];
+	try {
+		for (const entry of entries) {
+			await copyEntry(resolve(staging, entry), resolve(directory, entry), created);
+		}
+	} catch (cause) {
+		const rollbackErrors: unknown[] = [];
+		for (const entry of created.reverse()) {
+			try {
+				const current = await lstat(entry.path);
+				if (current.dev !== entry.device || current.ino !== entry.inode) {
+					continue;
+				}
+				if (entry.directory) {
+					await rmdir(entry.path);
+				} else {
+					await rm(entry.path);
+				}
+			} catch (error) {
+				rollbackErrors.push(error);
+			}
+		}
+		if (rollbackErrors.length > 0) {
+			throw new AggregateError(
+				rollbackErrors,
+				"Application initialization and rollback failed",
+				{ cause },
+			);
+		}
+
+		throw cause;
+	}
+}
+
+async function copyEntry(
+	source: string,
+	destination: string,
+	created: CreatedEntry[],
+): Promise<void> {
+	const sourceStats = await lstat(source);
+	if (sourceStats.isDirectory()) {
+		await mkdir(destination);
+		const destinationStats = await lstat(destination);
+		created.push({
+			path: destination,
+			directory: true,
+			device: destinationStats.dev,
+			inode: destinationStats.ino,
+		});
+		for (const entry of (await readdir(source)).sort()) {
+			await copyEntry(resolve(source, entry), resolve(destination, entry), created);
+		}
+
+		return;
+	}
+
+	await copyFile(source, destination, constants.COPYFILE_EXCL);
+	const destinationStats = await lstat(destination);
+	created.push({
+		path: destination,
+		directory: false,
+		device: destinationStats.dev,
+		inode: destinationStats.ino,
+	});
 }
 
 async function writeProject(directory: string, packageSource: string): Promise<void> {
