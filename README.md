@@ -69,13 +69,15 @@ The contract tests cover configuration and manifest creation, finite and persist
 
 ## Compiler and CLI
 
+Run `norstar init my-app` to create a minimal HTTP application, then run `bun install` and `bun run dev` in the new directory. Initialization is non-interactive and refuses to overwrite a non-empty target. Use `--framework <specifier>` to select a local tarball, checkout, or published Norstar version.
+
 Run `norstar check`, `norstar build`, or `norstar dev` from an application directory. In this checkout use `bun run norstar <command>`. The CLI accepts `--config framework.toml`, `--entry src/main.ts`, and `--outdir dist`.
 
 The compiler discovers exported classes in `src/**/*.service.ts` and `src/**/*.controller.ts`, infers constructor dependencies from class types, and validates missing registrations, circular dependencies, and singleton dependencies on scoped services. Controllers default to scoped lifetime; services default to transient. Explicit `static norstarService` metadata overrides these defaults. Configure `[application].discovery` with an array of glob patterns or use `serviceModules` for explicit modules.
 
 `check` validates the framework graph and TypeScript syntax and types without evaluating application modules or writing artifacts. It respects the local `tsconfig.json`; without one it checks TypeScript files under `src/` plus explicit service, route, and entry modules with strict Bun-compatible defaults. Available Bun and Node ambient types are enabled by default; an explicit `compilerOptions.types` selection takes precedence. `--entry` includes custom application entries in the validation. Diagnostics identify the file, position, and TypeScript error code. `build` generates `.norstar/manifest.ts` with static references, includes configured HTTP routes, and bundles a production entry in `dist/`. The bundle retains `Application.configure().create().run()` and runs without the original source files, directory scanning, or TOML parsing. `dev` recompiles and restarts on source and configuration changes. See [the compiled example](examples/compiled-app/README.md).
 
-This initial compiler requires concrete classes without inheritance, class-typed constructor dependencies or explicit static injection arrays, and class or exported `Symbol()` tokens. Dynamic metadata, `Symbol.for()` tokens, top-level await in configured route dependency graphs, TOML dates, and non-finite configuration numbers produce diagnostics. Interactive project creation is a later CLI extension.
+This initial compiler requires concrete classes without inheritance, class-typed constructor dependencies or explicit static injection arrays, and class or exported `Symbol()` tokens. Dynamic metadata, `Symbol.for()` tokens, top-level await in configured route dependency graphs, TOML dates, and non-finite configuration numbers produce diagnostics.
 
 The explicit runtime loader remains available for development integrations. Stopping during service loading cancels registration and lets shutdown finish without waiting for module evaluation; JavaScript module side effects already in progress cannot be cancelled. The Kernel has no dependency on the compiler or CLI.
 
