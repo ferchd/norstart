@@ -336,7 +336,9 @@ function toResponse(value: unknown): Response {
 
 function errorResponse(error: unknown): Response {
 	if (error instanceof HttpError) {
-		return Response.json({ error: error.message }, { status: error.status });
+		const message = error.expose ? error.message : "Internal Server Error";
+
+		return Response.json({ error: message }, { status: error.status });
 	}
 
 	return Response.json({ error: "Internal Server Error" }, { status: 500 });

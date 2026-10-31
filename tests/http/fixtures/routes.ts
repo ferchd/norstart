@@ -55,6 +55,14 @@ Route.get("/http-error", ({ services }) => {
 	throw new HttpError(418, "short and stout");
 });
 
+Route.get("/server-error", () => {
+	throw new HttpError(500, "secret server detail");
+});
+
+Route.get("/public-server-error", () => {
+	throw new HttpError(503, "Temporarily unavailable", { expose: true });
+});
+
 Route.get("/unexpected-error", ({ services }) => {
 	services.get(RequestState);
 

@@ -13,6 +13,7 @@ export class HttpProfileInstance implements ProfileInstance {
 	private finish!: () => void;
 	private server?: ReturnType<typeof Bun.serve>;
 	private stopped = false;
+	private stopPromise?: Promise<void>;
 
 	constructor(
 		private readonly configuration: HttpProfileConfiguration,
@@ -46,17 +47,65 @@ export class HttpProfileInstance implements ProfileInstance {
 		});
 	}
 
-	stop(): void {
-		if (this.stopped) {
-			return;
+	stop(signal: AbortSignal): Promise<void> {
+		if (!this.stopPromise) {
+			this.stopPromise = this.shutdown(signal);
 		}
 
+		return this.stopPromise;
+	}
+
+	private async shutdown(signal: AbortSignal): Promise<void> {
 		this.stopped = true;
 		const server = this.server;
 		this.server = undefined;
+		let abortHandler: (() => void) | undefined;
+
 		try {
-			server?.stop(true);
+			if (!server) {
+				return;
+			}
+
+			if (signal.aborted) {
+				await server.stop(true);
+
+				return;
+			}
+
+			const forced = new Promise<boolean>((resolve) => {
+				abortHandler = () => resolve(true);
+				signal.addEventListener("abort", abortHandler, { once: true });
+
+				if (signal.aborted) {
+					abortHandler();
+				}
+			});
+			const graceful = server.stop().then(() => false);
+			let forceRequired: boolean;
+			try {
+				forceRequired = await Promise.race([graceful, forced]);
+			} catch (error) {
+				try {
+					await server.stop(true);
+				} catch (forceError) {
+					throw new AggregateError(
+						[error, forceError],
+						"HTTP server graceful and forced shutdown both failed",
+						{ cause: forceError },
+					);
+				}
+
+				throw error;
+			}
+
+			if (forceRequired) {
+				await server.stop(true);
+			}
 		} finally {
+			if (abortHandler) {
+				signal.removeEventListener("abort", abortHandler);
+			}
+
 			this.finish();
 		}
 	}
