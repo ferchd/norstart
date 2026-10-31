@@ -2,8 +2,9 @@ import { describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArguments } from "../../src/cli/arguments.ts";
+import { publishToExistingDirectory } from "../../src/cli/init.ts";
 
 const cliPath = fileURLToPath(new URL("../../src/cli/main.ts", import.meta.url));
 const repository = fileURLToPath(new URL("../../", import.meta.url));
@@ -176,10 +177,46 @@ describe("Norstar CLI", () => {
 			);
 			expect(emptyTarget.exitCode).toBe(0);
 			expect(await Bun.file(join(directory, "empty/package.json")).exists()).toBe(true);
+
+			const currentDirectory = join(directory, "current-directory");
+			await mkdir(currentDirectory);
+			const probe = join(directory, "cwd-probe.ts");
+			await writeFile(
+				probe,
+				`import { runCli } from ${JSON.stringify(pathToFileURL(cliPath).href)};
+await runCli(["init", ".", "--framework", ${JSON.stringify(`file:${repository}`)}]);
+console.log(process.cwd());
+`,
+			);
+			const currentTarget = await executeCommand([process.execPath, probe], currentDirectory);
+			expect(currentTarget.exitCode).toBe(0);
+			expect(currentTarget.stderr).toBe("");
+			expect(currentTarget.stdout).toContain(currentDirectory);
+			expect(await Bun.file(join(currentDirectory, "package.json")).exists()).toBe(true);
 		} finally {
 			await rm(directory, { recursive: true, force: true });
 		}
 	}, 20000);
+
+	test("existing-directory publication preserves collisions and rolls back partial output", async () => {
+		const directory = await mkdtemp(join(tmpdir(), "norstar init collision "));
+		try {
+			const staging = join(directory, "staging");
+			const target = join(directory, "target");
+			await Promise.all([mkdir(staging), mkdir(target)]);
+			await Promise.all([
+				writeFile(join(staging, "a-generated.txt"), "generated"),
+				writeFile(join(staging, "z-collision.txt"), "generated"),
+				writeFile(join(target, "z-collision.txt"), "user"),
+			]);
+
+			await expect(publishToExistingDirectory(staging, target)).rejects.toThrow();
+			expect(await Bun.file(join(target, "a-generated.txt")).exists()).toBe(false);
+			expect(await Bun.file(join(target, "z-collision.txt")).text()).toBe("user");
+		} finally {
+			await rm(directory, { recursive: true, force: true });
+		}
+	});
 
 	test("the packaged CLI initializes and builds an external application", async () => {
 		const directory = await mkdtemp(join(tmpdir(), "norstar external "));
