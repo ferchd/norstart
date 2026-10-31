@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { Container } from "../../src/core/container.ts";
 import { Application } from "norstar";
 import { FixtureController, RequestState } from "./fixtures/controllers.ts";
+import { serviceModuleLoadedKey } from "./fixtures/discovery-tokens.ts";
 import {
 	releaseDrainResponse,
 	resetDrainControl,
@@ -129,6 +130,8 @@ describe("HTTP profile contract", () => {
 			const running = application.run();
 			try {
 				const json = await waitForResponse(`${serverUrl}/json/ready`);
+				const staticRoute = await fetch(`${serverUrl}/priority/new`);
+				const parameterRoute = await fetch(`${serverUrl}/priority/other`);
 				const firstControllerResponse = await fetch(`${serverUrl}/controller/first`);
 				const secondControllerResponse = await fetch(`${serverUrl}/controller/second`);
 				const knownError = await fetch(`${serverUrl}/http-error`);
@@ -137,6 +140,8 @@ describe("HTTP profile contract", () => {
 
 				expect(json.status).toBe(200);
 				expect(await json.json()).toEqual({ id: "ready" });
+				expect(await staticRoute.json()).toEqual({ route: "static" });
+				expect(await parameterRoute.json()).toEqual({ route: "parameter" });
 				expect(await firstControllerResponse.json()).toEqual({ id: "first", stateId: 1 });
 				expect(await secondControllerResponse.json()).toEqual({ id: "second", stateId: 2 });
 				expect(knownError.status).toBe(418);
@@ -238,5 +243,43 @@ describe("HTTP profile contract", () => {
 			process.exitCode = originalExitCode ?? 0;
 			console.error = originalConsoleError;
 		}
+	});
+
+	test("loads discoverable services from the compiled application manifest at run time", async () => {
+		await withTemporaryDirectory(async (directory) => {
+			const port = reservePort();
+			const configPath = join(directory, "framework.toml");
+			const routeModulePath = fileURLToPath(
+				new URL("./fixtures/discovery-routes.ts", import.meta.url),
+			).replaceAll("\\", "/");
+			const serviceModulePath = fileURLToPath(
+				new URL("./fixtures/discoverable-services.ts", import.meta.url),
+			).replaceAll("\\", "/");
+			await writeFile(
+				configPath,
+				`[application]\nserviceModules = [${JSON.stringify(serviceModulePath)}]\n\n[profiles.web]\ntype = "http-server"\nport = ${port}\nhostname = "127.0.0.1"\n\n[profiles.web.routes]\napi = "${routeModulePath}"\n`,
+			);
+
+			const moduleState = globalThis as typeof globalThis & Record<string, unknown>;
+			delete moduleState[serviceModuleLoadedKey];
+			const application = Application.configure({ configPath }).create();
+
+			expect(moduleState[serviceModuleLoadedKey]).toBeUndefined();
+
+			const running = application.run();
+			try {
+				const first = await waitForResponse(`http://127.0.0.1:${port}/discovery`);
+				const second = await fetch(`http://127.0.0.1:${port}/discovery`);
+
+				expect(moduleState[serviceModuleLoadedKey]).toBe(true);
+				expect(await first.json()).toEqual({ storeId: 1 });
+				expect(await second.json()).toEqual({ storeId: 2 });
+				expect((await application.stop()).status).toBe("stopped");
+				expect((await running).status).toBe("stopped");
+			} finally {
+				delete moduleState[serviceModuleLoadedKey];
+				await application.stop();
+			}
+		});
 	});
 });

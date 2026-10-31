@@ -20,6 +20,7 @@ export function parseConfiguration(source: string): ApplicationConfig {
 	if (!isRecord(application)) {
 		throw new Error("[application] must be a table");
 	}
+	const serviceModules = readServiceModules(application.serviceModules);
 	const rawProfiles = parsed.profiles;
 	if (!isRecord(rawProfiles) || Object.keys(rawProfiles).length === 0) {
 		throw new Error("framework.toml must define at least one [profiles.<name>] table");
@@ -42,8 +43,26 @@ export function parseConfiguration(source: string): ApplicationConfig {
 	return Object.freeze({
 		application: Object.freeze({
 			name: typeof application.name === "string" ? application.name : undefined,
+			serviceModules: Object.freeze(serviceModules),
 		}),
 		profiles: Object.freeze(profiles),
+	});
+}
+
+function readServiceModules(value: unknown): string[] {
+	if (value === undefined) {
+		return [];
+	}
+	if (!Array.isArray(value)) {
+		throw new Error("[application].serviceModules must be an array of module paths");
+	}
+
+	return value.map((modulePath, index) => {
+		if (typeof modulePath !== "string" || !modulePath.trim()) {
+			throw new Error(`[application].serviceModules[${index}] must be a non-empty path`);
+		}
+
+		return modulePath;
 	});
 }
 

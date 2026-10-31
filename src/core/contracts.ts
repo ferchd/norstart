@@ -10,6 +10,7 @@ export type KernelState =
 
 export type StopReason = "requested" | "signal" | "completed" | "failure";
 export type ExecutionMode = "persistent" | "finite";
+export type ServiceLifetime = "singleton" | "transient" | "scoped";
 
 export interface RunResult {
 	readonly status: "completed" | "stopped" | "failed";
@@ -61,7 +62,7 @@ export interface ProfileDefinition {
 }
 
 export interface ApplicationConfig {
-	readonly application: Readonly<{ name?: string }>;
+	readonly application: Readonly<{ name?: string; serviceModules: readonly string[] }>;
 	readonly profiles: Readonly<Record<string, ProfileDefinition>>;
 }
 
@@ -74,6 +75,7 @@ export interface ProfileRegistration {
 export interface ApplicationManifest {
 	readonly schemaVersion: number;
 	readonly frameworkVersion: string;
+	readonly serviceModules: readonly string[];
 	readonly profiles: readonly ProfileRegistration[];
 }
 

@@ -1,5 +1,6 @@
 [application]
 name = "norstar-http-demo"
+serviceModules = ["examples/http-demo/user-controller.ts"]
 
 [profiles.http]
 type = "http-server"

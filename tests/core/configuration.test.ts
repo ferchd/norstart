@@ -15,6 +15,7 @@ describe("Configuration", () => {
 		);
 
 		expect(configuration.application.name).toBe("norstar");
+		expect(configuration.application.serviceModules).toEqual([]);
 		expect(configuration.profiles.api?.type).toBe("http-server");
 		expect(configuration.profiles.api?.config).toEqual({ port: 3000 });
 		expect(Object.isFrozen(configuration)).toBe(true);
@@ -26,6 +27,26 @@ describe("Configuration", () => {
 		const configuration = parseConfiguration('[profiles.job]\ntype = "worker"');
 
 		expect(configuration.application.name).toBeUndefined();
+		expect(configuration.application.serviceModules).toEqual([]);
+	});
+
+	test("validates and freezes configured service modules", () => {
+		const configuration = parseConfiguration(
+			'[application]\nserviceModules = ["src/services.ts"]\n[profiles.job]\ntype = "worker"',
+		);
+
+		expect(configuration.application.serviceModules).toEqual(["src/services.ts"]);
+		expect(Object.isFrozen(configuration.application.serviceModules)).toBe(true);
+		expect(() =>
+			parseConfiguration(
+				'[application]\nserviceModules = "src/services.ts"\n[profiles.job]\ntype = "worker"',
+			),
+		).toThrow("must be an array of module paths");
+		expect(() =>
+			parseConfiguration(
+				'[application]\nserviceModules = [""]\n[profiles.job]\ntype = "worker"',
+			),
+		).toThrow("must be a non-empty path");
 	});
 
 	test("rejects malformed TOML and invalid application tables", () => {

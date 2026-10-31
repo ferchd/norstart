@@ -29,6 +29,11 @@ interface RouteRegistryState {
 	importQueue: Promise<void>;
 }
 
+type BunRouteRequest = Request & { readonly params: Readonly<Record<string, string>> };
+type BunRouteHandler = (request: BunRouteRequest) => Promise<Response>;
+type BunRouteHandlers = Partial<Record<HttpMethod, BunRouteHandler>>;
+type BunRouteTable = Record<string, BunRouteHandlers>;
+
 const routeRegistryKey = "__norstar_http_route_registry__";
 const routeRegistryHost = globalThis as typeof globalThis & {
 	__norstar_http_route_registry__?: RouteRegistryState;
@@ -81,6 +86,19 @@ export class Route {
 export class HttpRouter {
 	private constructor(private readonly routes: readonly RouteDefinition[]) {}
 
+	createBunRoutes(createScope: () => ServiceScope): BunRouteTable {
+		const routes: BunRouteTable = Object.create(null) as BunRouteTable;
+
+		for (const route of this.routes) {
+			const handlers = routes[route.path] ?? {};
+			handlers[route.method] = (request) =>
+				this.handleDefinition(request, route, createScope, request.params);
+			routes[route.path] = handlers;
+		}
+
+		return routes;
+	}
+
 	static async load(modules: unknown): Promise<HttpRouter> {
 		const paths = readRouteModules(modules);
 		const routes: RouteDefinition[] = [];
@@ -120,21 +138,13 @@ export class HttpRouter {
 	}
 
 	async handle(request: Request, createScope: () => ServiceScope): Promise<Response> {
-		let scope: ServiceScope;
-		try {
-			scope = createScope();
-		} catch {
-			return errorResponse(new HttpError(503, "Service Unavailable"));
-		}
+		return this.handleWithScope(createScope, async (scope) => this.dispatch(request, scope));
+	}
 
-		let response: Response;
-		try {
-			response = await this.dispatch(request, scope);
-		} catch (error) {
-			response = errorResponse(error);
-		}
-
-		return this.disposeScopeAfterResponse(response, scope);
+	async handleNotFound(createScope: () => ServiceScope): Promise<Response> {
+		return this.handleWithScope(createScope, async () =>
+			Response.json({ error: "Not Found" }, { status: 404 }),
+		);
 	}
 
 	private async disposeScopeAfterResponse(
@@ -208,6 +218,41 @@ export class HttpRouter {
 		}
 	}
 
+	private async handleDefinition(
+		request: Request,
+		route: RouteDefinition,
+		createScope: () => ServiceScope,
+		params: Readonly<Record<string, string>>,
+	): Promise<Response> {
+		return this.handleWithScope(createScope, async (scope) => {
+			const context = this.createContext(request, params, scope);
+			const result = await invokeTarget(route.target, context);
+
+			return toResponse(result);
+		});
+	}
+
+	private async handleWithScope(
+		createScope: () => ServiceScope,
+		handle: (scope: ServiceScope) => Promise<Response>,
+	): Promise<Response> {
+		let scope: ServiceScope;
+		try {
+			scope = createScope();
+		} catch {
+			return errorResponse(new HttpError(503, "Service Unavailable"));
+		}
+
+		let response: Response;
+		try {
+			response = await handle(scope);
+		} catch (error) {
+			response = errorResponse(error);
+		}
+
+		return this.disposeScopeAfterResponse(response, scope);
+	}
+
 	private async dispatch(request: Request, scope: ServiceScope): Promise<Response> {
 		const url = new URL(request.url);
 		const method = request.method.toUpperCase() as HttpMethod;
@@ -231,19 +276,27 @@ export class HttpRouter {
 				}
 			}
 
-			const context: HttpRequestContext = {
-				request,
-				params: Object.freeze(params),
-				services: Object.freeze({
-					get: <T>(token: ServiceToken<T>): T => scope.get(token),
-				}),
-			};
+			const context = this.createContext(request, params, scope);
 			const result = await invokeTarget(route.target, context);
 
 			return toResponse(result);
 		}
 
 		return Response.json({ error: "Not Found" }, { status: 404 });
+	}
+
+	private createContext(
+		request: Request,
+		params: Readonly<Record<string, string>>,
+		scope: ServiceScope,
+	): HttpRequestContext {
+		return {
+			request,
+			params: Object.freeze({ ...params }),
+			services: Object.freeze({
+				get: <T>(token: ServiceToken<T>): T => scope.get(token),
+			}),
+		};
 	}
 }
 
