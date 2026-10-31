@@ -6,6 +6,11 @@ import { fileURLToPath } from "node:url";
 import { Container } from "../../src/core/container.ts";
 import { Application } from "norstar";
 import { FixtureController, RequestState } from "./fixtures/controllers.ts";
+import {
+	releaseDrainResponse,
+	resetDrainControl,
+	waitForDrainRequest,
+} from "./fixtures/drain-control.ts";
 
 async function withTemporaryDirectory<T>(operation: (directory: string) => Promise<T>): Promise<T> {
 	const directory = await mkdtemp(join(tmpdir(), "norstar-http-test-"));
@@ -44,6 +49,40 @@ async function waitForResponse(url: string): Promise<Response> {
 	}
 
 	throw new Error(`HTTP server did not respond: ${url}`);
+}
+
+async function createDrainApplication(directory: string, shutdownTimeoutMs?: number) {
+	const port = reservePort();
+	const configPath = join(directory, "framework.toml");
+	const routeModulePath = fileURLToPath(
+		new URL("./fixtures/drain-routes.ts", import.meta.url),
+	).replaceAll("\\", "/");
+	await writeFile(
+		configPath,
+		`[profiles.web]\ntype = "http-server"\nport = ${port}\nhostname = "127.0.0.1"\n\n[profiles.web.routes]\napi = "${routeModulePath}"\n`,
+	);
+
+	const disposedStateIds: number[] = [];
+	const application = Application.configure({
+		configPath,
+		...(shutdownTimeoutMs === undefined ? {} : { shutdownTimeoutMs }),
+		configureServices: (services: Container) => {
+			services.register(
+				RequestState,
+				() =>
+					new RequestState(disposedStateIds.length + 1, () => {
+						disposedStateIds.push(disposedStateIds.length + 1);
+					}),
+				"scoped",
+			);
+		},
+	}).create();
+
+	return {
+		application,
+		disposedStateIds,
+		serverUrl: `http://127.0.0.1:${port}`,
+	};
 }
 
 describe("HTTP profile contract", () => {
@@ -116,5 +155,88 @@ describe("HTTP profile contract", () => {
 				await application.stop("requested");
 			}
 		});
+	});
+
+	test("gracefully drains an active HTTP request before completing shutdown", async () => {
+		await withTemporaryDirectory(async (directory) => {
+			resetDrainControl();
+			const { application, disposedStateIds, serverUrl } =
+				await createDrainApplication(directory);
+			const running = application.run();
+			let shutdownCompleted = false;
+
+			try {
+				const readinessResponse = await waitForResponse(`${serverUrl}/not-found`);
+				await readinessResponse.arrayBuffer();
+
+				const pendingResponse = fetch(`${serverUrl}/drain`);
+				await waitForDrainRequest();
+
+				const stopping = application.stop().then((result) => {
+					shutdownCompleted = true;
+
+					return result;
+				});
+				await Bun.sleep(20);
+
+				expect(shutdownCompleted).toBe(false);
+
+				releaseDrainResponse();
+				const response = await pendingResponse;
+
+				expect(response.status).toBe(200);
+				expect(await response.json()).toEqual({ status: "drained" });
+				expect((await stopping).status).toBe("stopped");
+				expect(disposedStateIds).toEqual([1]);
+				expect(await running).toMatchObject({ status: "stopped" });
+			} finally {
+				releaseDrainResponse();
+				await application.stop();
+			}
+		});
+	});
+
+	test("forces the HTTP server closed when the Kernel shutdown deadline expires", async () => {
+		const originalExitCode = process.exitCode;
+		const originalConsoleError = console.error;
+		console.error = () => undefined;
+
+		try {
+			await withTemporaryDirectory(async (directory) => {
+				resetDrainControl();
+				const { application, disposedStateIds, serverUrl } = await createDrainApplication(
+					directory,
+					50,
+				);
+				const running = application.run();
+
+				try {
+					const readinessResponse = await waitForResponse(`${serverUrl}/not-found`);
+					await readinessResponse.arrayBuffer();
+
+					const responsePromise = fetch(`${serverUrl}/drain`).then(
+						(response) => ({ status: "resolved" as const, response }),
+						(error: unknown) => ({ status: "rejected" as const, error }),
+					);
+					await waitForDrainRequest();
+
+					const result = await application.stop();
+
+					expect(result.status).toBe("failed");
+					expect(await running).toBe(result);
+
+					releaseDrainResponse();
+					const responseOutcome = await responsePromise;
+					expect(responseOutcome.status).toBe("rejected");
+					expect(disposedStateIds).toEqual([1]);
+				} finally {
+					releaseDrainResponse();
+					await application.stop();
+				}
+			});
+		} finally {
+			process.exitCode = originalExitCode ?? 0;
+			console.error = originalConsoleError;
+		}
 	});
 });

@@ -135,15 +135,30 @@ describe("HTTP router contract", () => {
 			new Request("http://localhost/unexpected-error"),
 			createScope,
 		);
+		const internalHttpError = await router.handle(
+			new Request("http://localhost/server-error"),
+			createScope,
+		);
+		const exposedHttpError = await router.handle(
+			new Request("http://localhost/public-server-error"),
+			createScope,
+		);
 		const knownBody = await knownError.text();
 		const unknownBody = await unknownError.text();
+		const internalHttpErrorBody = await internalHttpError.text();
+		const exposedHttpErrorBody = await exposedHttpError.text();
 
 		expect(knownError.status).toBe(418);
 		expect(knownBody).toContain("short and stout");
 		expect(unknownError.status).toBe(500);
 		expect(unknownBody).toContain("Internal Server Error");
 		expect(unknownBody).not.toContain("secret implementation detail");
-		expect(metrics).toEqual({ created: 2, disposed: 2 });
+		expect(internalHttpError.status).toBe(500);
+		expect(internalHttpErrorBody).toContain("Internal Server Error");
+		expect(internalHttpErrorBody).not.toContain("secret server detail");
+		expect(exposedHttpError.status).toBe(503);
+		expect(exposedHttpErrorBody).toContain("Temporarily unavailable");
+		expect(metrics).toEqual({ created: 4, disposed: 4 });
 		expect(requestStateDisposals).toBe(2);
 		await container.dispose();
 	});

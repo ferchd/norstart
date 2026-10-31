@@ -42,7 +42,7 @@ import { Application } from "norstar";
 Application.configure().create().run();
 ```
 
-Handlers may return a `Response`, string, JSON-serializable value, or `undefined`. Class controller targets use `[Controller, "method"]`; register controllers and their dependencies with the `configureServices` callback. Request scopes are disposed after the response body completes or is cancelled. Unknown errors produce a generic HTTP 500 response.
+Handlers may return a `Response`, string, JSON-serializable value, or `undefined`. Class controller targets use `[Controller, "method"]`; register controllers and their dependencies with the `configureServices` callback. Request scopes are disposed after the response body completes or is cancelled. `HttpError` 4xx messages are exposed by default; 5xx errors return a generic message unless created with `{ expose: true }`. Shutdown drains active requests and force-closes the server only when the Kernel's shutdown deadline expires.
 
 The HTTP demo includes a local throughput comparison with a native `Bun.serve()` endpoint. Run it with `bun run benchmark:http`; results depend on the machine and environment.
 
