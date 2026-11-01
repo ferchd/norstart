@@ -34,5 +34,5 @@ jobs:
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
 
-      - name: Verify quality, types, and tests
+      - name: Verify quality, types, tests, and production dependency audit
         run: bun run verify

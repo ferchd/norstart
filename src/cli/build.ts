@@ -3,6 +3,7 @@ import { dirname, isAbsolute, parse, relative, resolve, sep } from "node:path";
 import type { ApplicationCliOptions } from "./arguments.ts";
 import { compileApplication } from "../compiler/index.ts";
 import { quoteCodeString } from "../compiler/code-string.ts";
+import { auditBundleDependencies } from "../compiler/bundle-audit.ts";
 
 function importPath(from: string, target: string): string {
 	const path = relative(dirname(from), target).replaceAll("\\", "/");
@@ -44,6 +45,7 @@ export async function buildApplication(
 		outdir: outputDirectory,
 		naming: `${parse(entry).name}.js`,
 		target: "bun",
+		metafile: true,
 	});
 	if (!result.success) {
 		throw new AggregateError(result.logs, "Application build failed");
@@ -53,6 +55,14 @@ export async function buildApplication(
 	if (!output) {
 		throw new Error("Application build did not emit an entry point");
 	}
+	if (!result.metafile) {
+		throw new Error("Application build did not emit dependency metadata");
+	}
+	const dependencies = await auditBundleDependencies(result, { rootDirectory });
+	await writeFile(
+		resolve(dirname(manifest.manifestPath), "dependencies.json"),
+		`${JSON.stringify(dependencies, null, "\t")}\n`,
+	);
 
 	return output.path;
 }
