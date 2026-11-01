@@ -20,7 +20,39 @@ Pass reusable capabilities through `Application.configure({ extensions: [extensi
 
 Shutdown stops profiles first, then calls extension `shutdown({ services })` hooks in reverse initialization order, then disposes container services. A partially initialized extension also receives shutdown. Shutdown continues after individual cleanup errors and reports failures through the existing Kernel result. Initialization receives a lifetime cancellation signal; shutdown has no deadline signal and must settle promptly. The Kernel bounds the caller's shutdown wait, but JavaScript promises cannot be forcibly cancelled. If initialization settles late after cancellation, Norstar cleans that extension up once before disposing its services.
 
-This first extension API uses explicit programmatic wiring. Register extension factories and their dependencies directly in `register`; compiler discovery cannot infer providers hidden inside extension hooks for automatic constructor injection. Import extensions normally from the application entry point to include them in `norstar build`; there is no separate extension container or Kernel. See [the extensions demo](examples/extensions-demo/README.md).
+Extensions can declare `providers` alongside their lifecycle hooks. Each provider defines `token`, `useClass`, `inject`, and `lifetime`; Norstar registers these factories in the existing container before the extension's `register` hook. Providers are captured when creating the application and must not also be registered manually in that hook. See [the programmatic extensions demo](examples/extensions-demo/README.md).
+
+Declare extension modules in TOML to include their providers in compiler discovery:
+
+```toml
+[application]
+extensions = ["./src/database.extension.ts"]
+```
+
+```typescript
+import type { ApplicationExtension } from "norstar/core";
+
+export class DatabaseService {}
+export const DATABASE = Symbol("database");
+
+const extension: ApplicationExtension = {
+	name: "database",
+	providers: [
+		{
+			token: DATABASE,
+			useClass: DatabaseService,
+			inject: [],
+			lifetime: "singleton",
+		},
+	],
+};
+
+export default extension;
+```
+
+The compiler reads literal extension metadata without evaluating modules or executing hooks. It validates providers together with discovered services for missing registrations, duplicate tokens, dependency cycles, constructor type compatibility, and singleton dependencies on scoped services. Export concrete provider classes and class or `Symbol()` tokens. Dynamic metadata expressions are rejected. Packages must expose analyzable implementation metadata and runtime class/token sources; declaration files alone are insufficient. The compiled manifest captures provider references and extension lifecycle hooks, so application entries need only `Application.configure().create().run()` plus their profile configuration. See [the static extensions example](examples/static-extensions/README.md).
+
+TOML extension modules are loaded through `norstar dev` and `norstar build`. For direct, uncompiled use, import extensions and pass them through `Application.configure({ extensions })`. Programmatic `register` remains available for dynamic factories, but the compiler cannot infer providers hidden inside hooks; use declarative providers for dependencies of discovered services.
 
 ## HTTP profile
 

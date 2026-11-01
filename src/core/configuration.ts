@@ -21,7 +21,8 @@ export function parseConfiguration(source: string): ApplicationConfig {
 		throw new Error("[application] must be a table");
 	}
 	const serviceModules = readServiceModules(application.serviceModules);
-	const profileDrivers = readProfileDrivers(application.profileDrivers);
+	const profileDrivers = readModuleSpecifiers(application.profileDrivers, "profileDrivers");
+	const extensions = readModuleSpecifiers(application.extensions, "extensions");
 	const rawProfiles = parsed.profiles;
 	if (!isRecord(rawProfiles) || Object.keys(rawProfiles).length === 0) {
 		throw new Error("framework.toml must define at least one [profiles.<name>] table");
@@ -46,23 +47,24 @@ export function parseConfiguration(source: string): ApplicationConfig {
 			name: typeof application.name === "string" ? application.name : undefined,
 			serviceModules: Object.freeze(serviceModules),
 			profileDrivers: Object.freeze(profileDrivers),
+			extensions: Object.freeze(extensions),
 		}),
 		profiles: Object.freeze(profiles),
 	});
 }
 
-function readProfileDrivers(value: unknown): string[] {
+function readModuleSpecifiers(value: unknown, field: string): string[] {
 	if (value === undefined) {
 		return [];
 	}
 	if (!Array.isArray(value)) {
-		throw new Error("[application].profileDrivers must be an array of module specifiers");
+		throw new Error(`[application].${field} must be an array of module specifiers`);
 	}
 
 	return value.map((specifier, index) => {
 		if (typeof specifier !== "string" || !specifier.trim()) {
 			throw new Error(
-				`[application].profileDrivers[${index}] must be a non-empty module specifier`,
+				`[application].${field}[${index}] must be a non-empty module specifier`,
 			);
 		}
 

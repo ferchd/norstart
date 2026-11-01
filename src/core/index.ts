@@ -3,6 +3,7 @@ export type { ApplicationOptions } from "./application.ts";
 export type {
 	ApplicationExtension,
 	ExtensionContext,
+	ExtensionProvider,
 	ExtensionShutdownContext,
 } from "./extensions.ts";
 export { CircularDependencyError, Container } from "./container.ts";

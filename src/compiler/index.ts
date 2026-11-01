@@ -122,13 +122,26 @@ async function analyze(options: CompilerOptions) {
 		explicitFiles,
 		application.manifestPath,
 	);
+	const extensionFiles = (application.config.application.extensions ?? []).map((specifier) => {
+		const file = resolveDriverModule(specifier, application.root);
+		if (!file) {
+			throw new Error(`Extension module not found: ${specifier}`);
+		}
+
+		return file;
+	});
 	const analyzer = new ServiceAnalyzer(
 		completeProject.files,
 		completeProject.options,
 		application.root,
+		extensionFiles,
 	);
 	analyzer.validateRouteModules(application.routeFiles);
-	const services = analyzer.analyze(application.files);
+	const extensions = analyzer.analyzeExtensions(extensionFiles);
+	const services = analyzer.analyze(
+		application.files,
+		extensions.flatMap((extension) => extension.providers),
+	);
 	validateApplicationTypes(analyzer.program, application.root, completeProject.files);
 	validateProfileDrivers(
 		application.config.application.profileDrivers ?? [],
@@ -136,7 +149,7 @@ async function analyze(options: CompilerOptions) {
 		completeProject.options,
 	);
 
-	return { ...application, analyzer, services, driverFiles };
+	return { ...application, analyzer, services, driverFiles, extensions };
 }
 
 function resolveDriverModule(specifier: string, root: string): string | undefined {
@@ -192,6 +205,34 @@ export async function compileApplication(
 			factory,
 			`\t\t\t${quoteCodeString(service.lifetime)},`,
 			"\t\t);",
+		].join("\n");
+	});
+	const extensionDefinitions = application.extensions.map((extension, index) => {
+		const providers = extension.providers.map((provider) => {
+			return [
+				"\t\t\t\tObject.freeze({",
+				`\t\t\t\t\ttoken: ${reference(provider.token)},`,
+				`\t\t\t\t\tuseClass: ${reference(provider.implementation)},`,
+				"\t\t\t\t\tinject: Object.freeze([",
+				...provider.inject.map((token) => `\t\t\t\t\t\t${reference(token)},`),
+				"\t\t\t\t\t]),",
+				`\t\t\t\t\tlifetime: ${quoteCodeString(provider.lifetime)},`,
+				"\t\t\t\t}),",
+			].join("\n");
+		});
+		const alias = `extensionDefinition${index}`;
+
+		return [
+			"\t\tObject.freeze({",
+			`\t\t\tname: ${quoteCodeString(extension.name)},`,
+			`\t\t\tdependencies: ${frozenLiteral(extension.dependencies, 3)},`,
+			"\t\t\tproviders: Object.freeze([",
+			...providers,
+			"\t\t\t]),",
+			`\t\t\tregister: ${alias}.register?.bind(${alias}),`,
+			`\t\t\tinitialize: ${alias}.initialize?.bind(${alias}),`,
+			`\t\t\tshutdown: ${alias}.shutdown?.bind(${alias}),`,
+			"\t\t}),",
 		].join("\n");
 	});
 	const profileDriverImports = application.driverFiles.map((driverFile, index) => {
@@ -251,23 +292,35 @@ export async function compileApplication(
 			name: application.config.application.name,
 			serviceModules: [],
 			profileDrivers: application.config.application.profileDrivers ?? [],
+			extensions: application.config.application.extensions ?? [],
 		},
 		profiles,
 	};
 	const manifest = createManifest(config);
 	const lines = [
+		...application.extensions.map(
+			(extension, index) =>
+				`import * as extensionModule${index} from ${quoteCodeString(importPath(manifestPath, extension.file))};`,
+		),
 		...profileDriverImports.map(({ alias, path }) => `import * as ${alias} from ${path};`),
 		...routeImports,
-		'import type { CompiledApplicationDefinition } from "norstar/core";',
+		'import type { ApplicationExtension, CompiledApplicationDefinition } from "norstar/core";',
 		...[...imports].map(
 			([file, alias]) =>
 				`import * as ${alias} from ${quoteCodeString(importPath(manifestPath, file))};`,
 		),
 		"",
+		...application.extensions.map(
+			(_extension, index) =>
+				`const extensionDefinition${index} = extensionModule${index}.default as ApplicationExtension;`,
+		),
 		`const definition: CompiledApplicationDefinition = {`,
 		`\tconfig: ${frozenLiteral(config, 1)},`,
 		`\tmanifest: ${frozenLiteral(manifest, 1)},`,
 		`\tdrivers: Object.freeze([${profileDriverImports.map(({ alias }) => `${alias}.default`).join(", ")}]),`,
+		"\textensions: Object.freeze([",
+		...extensionDefinitions,
+		"\t]),",
 		"",
 		`\tregisterServices(services) {`,
 		registrations.join("\n\n"),

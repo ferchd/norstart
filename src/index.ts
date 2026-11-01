@@ -31,6 +31,7 @@ export type {
 	ApplicationOptions,
 	ApplicationExtension,
 	ExtensionContext,
+	ExtensionProvider,
 	ExtensionShutdownContext,
 	ExecutionMode,
 	KernelState,

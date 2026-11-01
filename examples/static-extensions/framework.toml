@@ -1,0 +1,6 @@
+[application]
+name = "static-extensions"
+extensions = ["./src/clock.extension.ts"]
+
+[profiles.task]
+type = "job"
