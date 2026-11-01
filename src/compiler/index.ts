@@ -5,6 +5,7 @@ import { createManifest } from "../core/manifest.ts";
 import type { ApplicationConfig } from "../core/contracts.ts";
 import { ServiceAnalyzer } from "./analyzer.ts";
 import { quoteCodeString } from "./code-string.ts";
+import { validateProfileDrivers } from "./profile-drivers.ts";
 import { isGeneratedFile, readApplicationProject, validateApplicationTypes } from "./project.ts";
 
 export interface CompilerOptions {
@@ -111,7 +112,9 @@ async function analyze(options: CompilerOptions) {
 		if (!moduleFile) {
 			throw new Error(`Profile driver module not found: ${specifier}`);
 		}
-		explicitFiles.push(moduleFile);
+		if (!/[\\/]node_modules[\\/]/.test(moduleFile)) {
+			explicitFiles.push(moduleFile);
+		}
 		driverFiles.push(moduleFile);
 	}
 	const completeProject = readApplicationProject(
@@ -127,6 +130,11 @@ async function analyze(options: CompilerOptions) {
 	analyzer.validateRouteModules(application.routeFiles);
 	const services = analyzer.analyze(application.files);
 	validateApplicationTypes(analyzer.program, application.root, completeProject.files);
+	validateProfileDrivers(
+		application.config.application.profileDrivers ?? [],
+		application.root,
+		completeProject.options,
+	);
 
 	return { ...application, analyzer, services, driverFiles };
 }

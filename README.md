@@ -48,6 +48,8 @@ Application.configure().create().run();
 
 Each module listed in `profileDrivers` must default-export one `ProfileDriver`. `norstar check` resolves the modules without evaluating them, and `norstar build` and `norstar dev` statically include them in the generated application. Install each driver package in the application before running these commands. For direct, uncompiled runtime use, pass drivers through `Application.configure({ drivers })` because creating an application remains synchronous.
 
+When a driver provides TypeScript source or declarations, `check` also validates its default export against the framework's `ProfileDriver` contract. JavaScript packages without declarations receive definitive export validation when `Application.create()` runs; neither `check` nor `build` evaluates package code to inspect runtime values.
+
 Handlers may return a `Response`, string, JSON-serializable value, or `undefined`. Class controller targets use `[Controller, "method"]`. Export service classes from configured modules with `static norstarService` metadata containing `lifetime` and constructor `inject` tokens; Norstar loads that manifest before profile bootstrap. Request scopes are disposed after the response body completes or is cancelled. `HttpError` 4xx messages are exposed by default; 5xx errors return a generic message unless created with `{ expose: true }`. The application handles `SIGINT` and `SIGTERM`, drains active requests and force-closes the server only when the Kernel's shutdown deadline expires.
 
 The HTTP demo includes a local throughput comparison with a native `Bun.serve()` endpoint. Run it with `bun run benchmark:http`; results depend on the machine and environment.

@@ -65,7 +65,8 @@
 		"typescript": "npm:@typescript/typescript6@^6.0.2"
 	},
 	"overrides": {
-		"typescript": "npm:@typescript/typescript6@^6.0.2"
+		"typescript": "npm:@typescript/typescript6@^6.0.2",
+		"minimatch": "^11.0.1"
 	},
 	"peerDependencies": {
 		"typescript": ">=6.0.2 <8"

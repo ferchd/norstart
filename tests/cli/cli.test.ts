@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -348,42 +348,27 @@ console.log(process.cwd());
 	test("loads a config-declared external driver into the standalone build", async () => {
 		const directory = await mkdtemp(join(tmpdir(), "norstar-external-driver-"));
 		try {
-			const packageDirectory = join(directory, "vendor", "@norstar-test", "external-driver");
-			await mkdir(join(directory, "src"));
+			const inputs = join(directory, "inputs");
+			const application = join(inputs, "application");
+			const artifacts = join(inputs, "artifacts");
+			const runtime = join(directory, "runtime");
+			const packageDirectory = join(inputs, "driver");
+			await mkdir(join(application, "src"), { recursive: true });
+			await Promise.all([mkdir(artifacts), mkdir(runtime)]);
 			await mkdir(packageDirectory, { recursive: true });
 			await writeFile(
 				join(packageDirectory, "package.json"),
 				JSON.stringify({
 					name: "@norstar-test/external-driver",
+					version: "1.0.0",
 					type: "module",
 					exports: { import: "./index.js" },
 				}),
 			);
 			await writeFile(
-				join(directory, "package.json"),
-				JSON.stringify({
-					private: true,
-					dependencies: {
-						"@norstar-test/external-driver":
-							"file:vendor/@norstar-test/external-driver",
-					},
-				}),
-			);
-			await writeFile(
-				join(directory, "tsconfig.json"),
-				JSON.stringify({
-					compilerOptions: {
-						paths: {
-							norstar: [join(repository, "src/index.ts")],
-							"norstar/*": [join(repository, "src/*")],
-						},
-					},
-				}),
-			);
-			await writeFile(
 				join(packageDirectory, "index.js"),
 				`import { appendFileSync } from "node:fs";
-appendFileSync(${JSON.stringify(join(directory, "driver-loaded.txt"))}, "loaded\\n");
+appendFileSync("driver-loaded.txt", "loaded\\n");
 
 export default {
 	type: "external-job",
@@ -395,16 +380,43 @@ export default {
 				console.log("external driver started");
 			},
 			stop() {
-				appendFileSync(${JSON.stringify(join(directory, "driver-stopped.txt"))}, "stopped\\n");
+				appendFileSync("driver-stopped.txt", "stopped\\n");
 			},
 		};
 	},
 };
 `,
 			);
+			for (const source of [repository, packageDirectory]) {
+				const packed = await executeCommand(
+					[
+						process.execPath,
+						"pm",
+						"pack",
+						"--ignore-scripts",
+						"--destination",
+						artifacts,
+					],
+					source,
+				);
+				if (packed.exitCode !== 0) {
+					throw new Error(`Package creation failed:\n${packed.stdout}${packed.stderr}`);
+				}
+			}
+			const frameworkPackage = await Bun.file(join(repository, "package.json")).json();
+			await writeFile(
+				join(application, "package.json"),
+				JSON.stringify({
+					private: true,
+					dependencies: {
+						norstar: `file:${join(artifacts, `norstar-${frameworkPackage.version}.tgz`)}`,
+						"@norstar-test/external-driver": `file:${join(artifacts, "norstar-test-external-driver-1.0.0.tgz")}`,
+					},
+				}),
+			);
 			const installed = await executeCommand(
 				[process.execPath, "install", "--ignore-scripts", "--backend=copyfile"],
-				directory,
+				application,
 			);
 			if (installed.exitCode !== 0) {
 				throw new Error(
@@ -412,47 +424,53 @@ export default {
 				);
 			}
 			await writeFile(
-				join(directory, "framework.toml"),
+				join(application, "framework.toml"),
 				'[application]\nprofileDrivers = ["@norstar-test/external-driver"]\n\n[profiles.job]\ntype = "external-job"\n',
 			);
 			await writeFile(
-				join(directory, "src/main.ts"),
+				join(application, "src/main.ts"),
 				'import { Application } from "norstar";\nawait Application.configure().create().run();\n',
 			);
 
-			const checked = await execute(["check"], directory);
+			const checked = await executeCommand(
+				[process.execPath, "run", "--no-install", "norstar", "check"],
+				application,
+			);
 			if (checked.exitCode !== 0) {
 				throw new Error(
 					`External driver check failed:\n${checked.stdout}${checked.stderr}`,
 				);
 			}
 			expect(checked.exitCode).toBe(0);
-			expect(await Bun.file(join(directory, "driver-loaded.txt")).exists()).toBe(false);
-			const built = await execute(["build"], directory);
+			expect(await Bun.file(join(application, "driver-loaded.txt")).exists()).toBe(false);
+			const built = await executeCommand(
+				[process.execPath, "run", "--no-install", "norstar", "build"],
+				application,
+			);
 			if (built.exitCode !== 0) {
 				throw new Error(`External driver build failed:\n${built.stdout}${built.stderr}`);
 			}
 			expect(built.exitCode).toBe(0);
-			expect(await Bun.file(join(directory, "driver-loaded.txt")).exists()).toBe(false);
+			expect(await Bun.file(join(application, "driver-loaded.txt")).exists()).toBe(false);
 
-			await rm(join(directory, "src"), { recursive: true });
-			await rm(join(directory, "framework.toml"));
-			await rm(join(directory, ".norstar"), { recursive: true });
-			await rm(join(directory, "node_modules"), { recursive: true });
+			await copyFile(join(application, "dist/main.js"), join(runtime, "main.js"));
+			await rm(inputs, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+			expect(await readdir(directory)).toEqual(["runtime"]);
+			expect(await readdir(runtime)).toEqual(["main.js"]);
 			const artifact = await executeCommand(
-				[process.execPath, join(directory, "dist/main.js")],
-				directory,
+				[process.execPath, join(runtime, "main.js")],
+				runtime,
 			);
 
 			expect(artifact.exitCode).toBe(0);
 			expect(artifact.stderr).toBe("");
 			expect(artifact.stdout).toContain("external driver started");
-			expect(await Bun.file(join(directory, "driver-loaded.txt")).text()).toBe("loaded\n");
-			expect(await Bun.file(join(directory, "driver-stopped.txt")).text()).toBe("stopped\n");
+			expect(await Bun.file(join(runtime, "driver-loaded.txt")).text()).toBe("loaded\n");
+			expect(await Bun.file(join(runtime, "driver-stopped.txt")).text()).toBe("stopped\n");
 		} finally {
 			await rm(directory, { recursive: true, force: true });
 		}
-	}, 30000);
+	}, 90000);
 
 	test("invalid commands fail with a nonzero exit status", async () => {
 		const result = await execute(["unknown"], process.cwd());
