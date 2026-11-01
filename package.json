@@ -23,6 +23,8 @@
 		".": "./src/index.ts",
 		"./core": "./src/core/index.ts",
 		"./http": "./src/http/index.ts",
+		"./sql": "./src/sql/index.ts",
+		"./query": "./src/query/index.ts",
 		"./compiler": "./src/compiler/index.ts"
 	},
 	"bin": {
