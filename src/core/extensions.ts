@@ -1,4 +1,9 @@
-import type { ServiceContainer, ServiceResolver } from "./contracts.ts";
+import type {
+	ServiceContainer,
+	ServiceLifetime,
+	ServiceResolver,
+	ServiceToken,
+} from "./contracts.ts";
 import type { Container } from "./container.ts";
 
 export interface ExtensionShutdownContext {
@@ -9,9 +14,17 @@ export interface ExtensionContext extends ExtensionShutdownContext {
 	readonly signal: AbortSignal;
 }
 
+export interface ExtensionProvider {
+	readonly token: ServiceToken<unknown>;
+	readonly useClass: new (...args: never[]) => object;
+	readonly inject: readonly ServiceToken<unknown>[];
+	readonly lifetime: ServiceLifetime;
+}
+
 export interface ApplicationExtension {
 	readonly name: string;
 	readonly dependencies?: readonly string[];
+	readonly providers?: readonly ExtensionProvider[];
 	/** Register factories only. External resources belong in initialize(). */
 	register?(services: Container): void;
 	/** Honor cancellation and release partially initialized resources in shutdown(). */
@@ -35,6 +48,17 @@ export class ExtensionManager {
 
 	register(): void {
 		for (const extension of this.ordered) {
+			for (const provider of extension.providers ?? []) {
+				this.services.register(
+					provider.token,
+					(resolver) =>
+						Reflect.construct(
+							provider.useClass,
+							provider.inject.map((token) => resolver.get(token)),
+						),
+					provider.lifetime,
+				);
+			}
 			const result: unknown = extension.register?.(this.services);
 			if (
 				result !== null &&
@@ -147,6 +171,7 @@ function orderExtensions(
 	extensions: readonly ApplicationExtension[],
 ): readonly ApplicationExtension[] {
 	const byName = new Map<string, ApplicationExtension>();
+	const providerTokens = new Set<ServiceToken<unknown>>();
 	for (const extension of extensions) {
 		if (!extension || typeof extension.name !== "string" || !extension.name.trim()) {
 			throw new Error("Extension names must be non-empty strings");
@@ -166,11 +191,13 @@ function orderExtensions(
 		) {
 			throw new Error(`Invalid extension dependencies: ${extension.name}`);
 		}
+		const providers = snapshotProviders(extension, providerTokens);
 		byName.set(
 			extension.name,
 			Object.freeze({
 				name: extension.name,
 				dependencies: Object.freeze([...(extension.dependencies ?? [])]),
+				providers,
 				register: extension.register?.bind(extension),
 				initialize: extension.initialize?.bind(extension),
 				shutdown: extension.shutdown?.bind(extension),
@@ -201,4 +228,46 @@ function orderExtensions(
 	}
 
 	return ordered;
+}
+
+function snapshotProviders(
+	extension: ApplicationExtension,
+	tokens: Set<ServiceToken<unknown>>,
+): readonly ExtensionProvider[] {
+	if (extension.providers === undefined) {
+		return Object.freeze([]);
+	}
+	if (!Array.isArray(extension.providers)) {
+		throw new Error(`Invalid extension providers: ${extension.name}`);
+	}
+
+	return Object.freeze(
+		extension.providers.map((provider: ExtensionProvider, index: number) => {
+			if (
+				!provider ||
+				!isToken(provider.token) ||
+				typeof provider.useClass !== "function" ||
+				!Array.isArray(provider.inject) ||
+				!provider.inject.every(isToken) ||
+				!["singleton", "scoped", "transient"].includes(provider.lifetime)
+			) {
+				throw new Error(`Invalid extension provider: ${extension.name}[${index}]`);
+			}
+			if (tokens.has(provider.token)) {
+				throw new Error(`Duplicate extension provider token: ${String(provider.token)}`);
+			}
+			tokens.add(provider.token);
+
+			return Object.freeze({
+				token: provider.token,
+				useClass: provider.useClass,
+				inject: Object.freeze([...provider.inject]),
+				lifetime: provider.lifetime,
+			});
+		}),
+	);
+}
+
+function isToken(value: unknown): value is ServiceToken<unknown> {
+	return typeof value === "symbol" || typeof value === "function";
 }

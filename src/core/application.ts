@@ -131,7 +131,10 @@ class ConfiguredApplication {
 			}
 		}
 		const services = new Container();
-		const extensions = new ExtensionManager(this.options.extensions ?? [], services);
+		const extensions = new ExtensionManager(
+			[...(compiled?.extensions ?? []), ...(this.options.extensions ?? [])],
+			services,
+		);
 		try {
 			compiled?.registerServices(services);
 			extensions.register();
