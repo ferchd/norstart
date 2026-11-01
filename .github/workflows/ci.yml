@@ -87,7 +87,7 @@ jobs:
           --health-retries 10
     env:
       NORSTAR_TEST_POSTGRESQL_URL: postgres://norstar:norstar@127.0.0.1:5432/norstar
-      NORSTAR_TEST_MYSQL_URL: mysql://norstar:norstar@127.0.0.1:3306/norstar
+      NORSTAR_TEST_MYSQL_URL: mysql://norstar:norstar@127.0.0.1:3306/norstar?sslmode=require
       NORSTAR_TEST_MARIADB_URL: mariadb://norstar:norstar@127.0.0.1:3307/norstar
     steps:
       - name: Check out repository

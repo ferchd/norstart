@@ -21,7 +21,7 @@ export interface SqlTransaction {
 }
 
 type State = "new" | "connecting" | "ready" | "closing" | "closed";
-type Binding = string | number | bigint | boolean | null;
+type Binding = string | number | bigint | boolean | Date | null;
 
 function timeout(value: unknown, fallback: number): number {
 	if (value === undefined) {
@@ -94,6 +94,9 @@ function bindings(query: CompiledQuery, dialect: SqlDialect): Binding[] {
 		}
 		if (parameter.type === "boolean" && dialect === "sqlite") {
 			return parameter.value ? 1 : 0;
+		}
+		if (parameter.type === "timestamp" && (dialect === "mysql" || dialect === "mariadb")) {
+			return new Date(parameter.value);
 		}
 
 		return parameter.value;
