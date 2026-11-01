@@ -16,7 +16,7 @@ TypeScript remains a compiler dependency in the current distribution. Changing i
 
 ## SQL and query modules
 
-`norstar/sql` exposes dialect and typed parameter contracts. `norstar/query` exposes immutable AST construction and SQL compilation. Neither module imports the TypeScript compiler, manages connections, or evaluates SQL.
+`norstar/sql` exposes typed parameter contracts, the Bun.SQL client, and lifecycle helpers. `norstar/query` exposes immutable AST construction and SQL compilation. Both runtime modules use native APIs and remain independent of the TypeScript compiler.
 
 ```typescript
 import { parameter } from "norstar/sql";
@@ -33,9 +33,9 @@ const query = selectQuery({
 const compiled = compileQuery(query, "postgresql");
 ```
 
-The result contains SQL text with placeholders and a separate ordered array of typed parameters. User values never become SQL text. Pagination values are also bound parameters. Parameter metadata remains available for the future Bun.SQL adapter to convert and bind values appropriately.
+The result contains SQL text with placeholders and a separate ordered array of typed parameters. User values never become SQL text. Pagination values are also bound parameters. The SQL client converts the typed parameters to native bindings.
 
-`CompiledQuery` is an inspection result, not an execution capability. The future SQL client must obtain executable text through the AST compiler rather than trust arbitrary user-created objects containing a `text` field.
+`CompiledQuery` is an inspection result, not an execution capability. `SqlClient.execute()` receives an AST and obtains executable text through the compiler. It rejects arbitrary objects containing SQL text.
 
 Identifiers are validated independently of values. Schema, table, column, and alias names use separate identifier nodes; dotted paths and arbitrary SQL fragments are not identifier inputs. There is no raw SQL expression node or public SQL template API. This initial identifier grammar is intentionally conservative.
 
@@ -43,7 +43,63 @@ The AST supports SELECT projections, schema-qualified table sources, aliases, co
 
 The typed parameter contract distinguishes text, safe integers, bigint, decimal strings, booleans, canonical UTC timestamp strings (`YYYY-MM-DDTHH:mm:ss.sssZ`), and null. Non-finite or unsafe numbers, invalid decimal/timestamp values, unknown node kinds, and unsupported operators are rejected at runtime as well as constrained by TypeScript. Explicit null predicates are available; equality and inequality against a typed null parameter compile to `IS NULL` and `IS NOT NULL`. Ordering comparisons against null are rejected.
 
-These are AST construction functions, not the future LINQ query interface. Schema/model inference and expression compatibility based on model columns belong to later stages. SQLite execution tests use Bun's native SQLite API to verify emitted SQL and binding order; other dialect tests verify generation without claiming server integration coverage.
+These are AST construction functions, not the future LINQ query interface. Schema/model inference and expression compatibility based on model columns belong to later stages.
+
+## SQL client and lifecycle
+
+`SqlClient` construction validates and snapshots configuration without constructing a native pool or opening a database. Call `connect()` during application initialization. Queries require an established connection; `close()` and `dispose()` are idempotent and prevent reopening the client.
+
+```typescript
+import { SqlClient } from "norstar/sql";
+import { column, identifier, selectQuery } from "norstar/query";
+
+const client = new SqlClient({ url: ":memory:", dialect: "sqlite" });
+await client.connect();
+
+try {
+	const tables = await client.transaction(async (transaction) => {
+		return transaction.execute(
+			selectQuery({
+				from: { name: identifier("sqlite_master") },
+				columns: [{ expression: column("name") }],
+			}),
+		);
+	});
+	console.log(tables);
+} finally {
+	await client.close();
+}
+```
+
+Transaction callbacks use an explicit handle. Root-client calls inside that callback are rejected; there is no implicit routing of queries into transactions. Handles expire when callbacks finish, issued queries drain before commit, and any issued query failure rejects the transaction even when the callback catches it. Nested transactions and savepoints are not exposed in this first client API. PostgreSQL and MySQL-family transactions use native reserved connections. SQLite operations outside a transaction queue until it finishes because Bun's SQLite adapter uses one connection.
+
+Closing rejects new root operations and drains accepted work within `closeTimeoutSeconds`, then closes the native pool with the remaining time. Cancellation of `connect(signal)` closes the client and prevents a late connection from reopening it. JavaScript callbacks cannot be forcibly terminated: closing can finish while a noncooperative callback remains pending, and its native connection is no longer usable. There is no automatic transaction retry; a connection failure during commit can leave the outcome indeterminate.
+
+Options are explicit `url` and `dialect`, with optional `maxConnections` (default 10), `connectionTimeoutSeconds` (default 10), and `closeTimeoutSeconds` (default 5). URLs must match the selected dialect; there is no implicit selection from database environment variables. SQLite always uses a single connection. Integer bindings are safe JavaScript numbers; bigint bindings must fit signed 64-bit values. SQLite enables exact integer decoding and normalizes only safe integers to `number`; larger values remain `bigint`. Network adapters use Bun's bigint decoding. Decimal and timestamp parameters bind as strings, and SQLite boolean parameters bind as 1 or 0. Row values otherwise retain native decoding; the optional generic row type is an annotation, not runtime schema validation.
+
+## Configuration and extensions
+
+For direct programmatic applications, `createSqlExtension(options)` registers the default `SQL_OPTIONS` and `SqlClient` singleton factories, connects during initialization, and closes after profiles stop. Each application receives its own client. The configuration is captured when creating the extension.
+
+Compiled applications use declarative providers for `SQL_OPTIONS` and `SqlClient` with `initializeSql` and `shutdownSql` lifecycle hooks. The [SQL client example](../examples/sql-client/README.md) imports TOML as bundled data and resolves environment values when its configuration provider is instantiated at runtime:
+
+```toml
+[sql]
+dialect = "sqlite"
+url = ":memory:"
+urlEnvironment = "NORSTAR_DATABASE_URL"
+closeTimeoutSeconds = 1
+```
+
+`sqlOptionsFromConfiguration(table)` maps this table to client options. An environment override takes precedence; an explicitly empty override fails instead of using the fallback. Put credentials in environment variables rather than bundled TOML. Numeric ranges and URL/dialect compatibility are validated by the client constructor. The parser does not read files: importing configuration as data keeps compiled artifacts independent of their original TOML and source files.
+
+The public query contract remains SELECT-only. Read transaction success, callback failure, handle expiry, binding behavior, and connection cleanup are tested locally with SQLite. CI additionally runs the native PostgreSQL, MySQL, and MariaDB integration suite against isolated service containers. Run it locally with all three `NORSTAR_TEST_POSTGRESQL_URL`, `NORSTAR_TEST_MYSQL_URL`, and `NORSTAR_TEST_MARIADB_URL` values set:
+
+```sh
+bun test ./tests/sql/databases.integration.ts
+```
+
+That explicit suite fails when a required URL is absent. Its fixtures create and remove their own uniquely named tables using native test-only setup queries. Data-changing AST nodes and write-rollback execution coverage belong to the later query-writing milestone.
 
 ## Roadmap
 

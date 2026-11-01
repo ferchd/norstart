@@ -203,15 +203,42 @@ function resolvedPackageRoot(importer: string, specifier: string): string | unde
 }
 
 function emittedImports(file: string, text: string): { specifiers: string[]; unresolved: number } {
-	const source = ts.createSourceFile(file, text, ts.ScriptTarget.ESNext, true, ts.ScriptKind.JS);
-	const aliases = new Set(["require"]);
+	const absoluteFile = resolve(file);
+	const source = ts.createSourceFile(
+		absoluteFile,
+		text,
+		ts.ScriptTarget.ESNext,
+		true,
+		ts.ScriptKind.JS,
+	);
+	const options: ts.CompilerOptions = {
+		allowJs: true,
+		noEmit: true,
+		noLib: true,
+		noResolve: true,
+		types: [],
+		target: ts.ScriptTarget.ESNext,
+		module: ts.ModuleKind.ESNext,
+	};
+	const host = ts.createCompilerHost(options);
+	host.getSourceFile = (path) => (resolve(path) === absoluteFile ? source : undefined);
+	host.fileExists = (path) => resolve(path) === absoluteFile;
+	host.readFile = (path) => (resolve(path) === absoluteFile ? text : undefined);
+	const program = ts.createProgram([absoluteFile], options, host);
+	const checker = program.getTypeChecker();
+	const aliases = new Set<ts.Symbol>();
 	const requireReference = (node: ts.Expression): boolean => {
+		if (ts.isIdentifier(node)) {
+			const symbol = checker.getSymbolAtLocation(node);
+
+			return symbol ? aliases.has(symbol) : node.text === "require";
+		}
+
 		return (
-			(ts.isIdentifier(node) && aliases.has(node.text)) ||
-			(ts.isPropertyAccessExpression(node) &&
-				node.name.text === "require" &&
-				ts.isMetaProperty(node.expression) &&
-				node.expression.keywordToken === ts.SyntaxKind.ImportKeyword)
+			ts.isPropertyAccessExpression(node) &&
+			node.name.text === "require" &&
+			ts.isMetaProperty(node.expression) &&
+			node.expression.keywordToken === ts.SyntaxKind.ImportKeyword
 		);
 	};
 	let changed = true;
@@ -222,21 +249,25 @@ function emittedImports(file: string, text: string): { specifiers: string[]; unr
 				ts.isVariableDeclaration(node) &&
 				ts.isIdentifier(node.name) &&
 				node.initializer &&
-				requireReference(node.initializer) &&
-				!aliases.has(node.name.text)
+				requireReference(node.initializer)
 			) {
-				aliases.add(node.name.text);
-				changed = true;
+				const symbol = checker.getSymbolAtLocation(node.name);
+				if (symbol && !aliases.has(symbol)) {
+					aliases.add(symbol);
+					changed = true;
+				}
 			}
 			if (
 				ts.isBinaryExpression(node) &&
 				node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
 				ts.isIdentifier(node.left) &&
-				requireReference(node.right) &&
-				!aliases.has(node.left.text)
+				requireReference(node.right)
 			) {
-				aliases.add(node.left.text);
-				changed = true;
+				const symbol = checker.getSymbolAtLocation(node.left);
+				if (symbol && !aliases.has(symbol)) {
+					aliases.add(symbol);
+					changed = true;
+				}
 			}
 			ts.forEachChild(node, collect);
 		};
