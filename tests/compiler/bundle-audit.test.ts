@@ -232,6 +232,33 @@ test("detects a retained require assigned to a previously declared alias", async
 	});
 });
 
+test("distinguishes real require aliases from shadowing callback parameters", async () => {
+	await withTemporaryDirectory(async (directory) => {
+		const entry = join(directory, "main.cjs");
+		await writeFile(
+			entry,
+			`const loader = require;
+function local(loader) {
+	return loader("callback-argument");
+}
+function shadow(require) {
+	return require("local-require-argument");
+}
+function nested() {
+	const loader = (value) => value;
+	return loader("block-local-argument");
+}
+console.log(local((value) => value), shadow((value) => value), nested());
+console.log(loader("real-package"));`,
+		);
+		const result = await bundle(entry, join(directory, "dist"), ["real-package"]);
+		const report = await auditBundleDependencies(result, { rootDirectory: directory });
+
+		expect(report.externalPackages).toEqual(["real-package"]);
+		expect(report.unresolvedDynamicImports).toBe(0);
+	});
+});
+
 test("CLI builds report chosen third-party dependencies without banning user integrations", async () => {
 	const directory = await mkdtemp(join(process.cwd(), ".norstar-cli-test-audit-"));
 	try {

@@ -98,7 +98,7 @@ The HTTP demo includes a local throughput comparison with a native `Bun.serve()`
 
 ## Acceptance checks
 
-The persistence foundation is available from `norstar/sql` and `norstar/query`: typed parameters, an immutable SELECT AST, and parameterized SQL generation for PostgreSQL, MySQL, MariaDB, and SQLite. It does not open connections. See [the persistence contracts](docs/persistence.md) and [the SQL AST example](examples/sql-ast/README.md).
+The persistence foundation is available from `norstar/sql` and `norstar/query`: typed parameters, an immutable SELECT AST, a native Bun.SQL client, explicit read transactions, and extension lifecycle integration for PostgreSQL, MySQL, MariaDB, and SQLite. See [the persistence contracts](docs/persistence.md), [the SQL AST example](examples/sql-ast/README.md), and [the compiled SQL client example](examples/sql-client/README.md).
 
 ```sh
 bun run verify

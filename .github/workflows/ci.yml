@@ -24,6 +24,8 @@ jobs:
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2.2.0
+        with:
+          bun-version: "1.4.4"
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -36,3 +38,68 @@ jobs:
 
       - name: Verify quality, types, tests, and production dependency audit
         run: bun run verify
+
+  sql-integration:
+    name: SQL database integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: norstar
+          POSTGRES_PASSWORD: norstar
+          POSTGRES_DB: norstar
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U norstar -d norstar"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: norstar
+          MYSQL_DATABASE: norstar
+          MYSQL_USER: norstar
+          MYSQL_PASSWORD: norstar
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 --protocol=tcp -pnorstar"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_ROOT_PASSWORD: norstar
+          MARIADB_DATABASE: norstar
+          MARIADB_USER: norstar
+          MARIADB_PASSWORD: norstar
+        ports:
+          - 3307:3306
+        options: >-
+          --health-cmd "healthcheck.sh --connect --innodb_initialized"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      NORSTAR_TEST_POSTGRESQL_URL: postgres://norstar:norstar@127.0.0.1:5432/norstar
+      NORSTAR_TEST_MYSQL_URL: mysql://norstar:norstar@127.0.0.1:3306/norstar?sslmode=require
+      NORSTAR_TEST_MARIADB_URL: mariadb://norstar:norstar@127.0.0.1:3307/norstar
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7.0.1
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2.2.0
+        with:
+          bun-version: "1.4.4"
+
+      - name: Install development dependencies
+        run: bun install --frozen-lockfile --ignore-scripts
+
+      - name: Verify native SQL adapters
+        run: bun test ./tests/sql/databases.integration.ts

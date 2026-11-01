@@ -1,0 +1,12 @@
+[application]
+name = "sql-client-demo"
+extensions = ["./src/database.extension.ts"]
+
+[sql]
+dialect = "sqlite"
+url = ":memory:"
+urlEnvironment = "NORSTAR_DATABASE_URL"
+closeTimeoutSeconds = 1
+
+[profiles.task]
+type = "job"
