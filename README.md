@@ -12,6 +12,16 @@ Runnable demonstrations are isolated under [`examples/`](examples/). Run the ker
 
 Profiles are described by named `[profiles.<id>]` TOML tables. A `ProfileDriver` creates a `ProfileInstance`; the Kernel only uses the generic instance lifecycle (`mode`, `finished`, `start`, `stop`). Adding another transport means implementing and registering a driver. The Kernel has no HTTP, TCP, routing or database code.
 
+## Application extensions
+
+Pass reusable capabilities through `Application.configure({ extensions: [extension] })`. An `ApplicationExtension` has a unique `name`, optional `dependencies` containing other extension names, and optional `register`, `initialize`, and `shutdown` hooks. Norstar validates the complete dependency graph before registration and uses a stable dependency order. It captures the dependency names and hook references when creating the application.
+
+`register(services)` synchronously adds factories to the application's existing `Container` during `create()`. It must not open external resources or return a promise. Compiled service factories register first, then extensions, then `configureServices`. `initialize({ services, signal })` runs after application service modules load and before profile bootstrap. Dependencies initialize first; `create()` never initializes extensions. The resolver is shared with profiles and application services.
+
+Shutdown stops profiles first, then calls extension `shutdown({ services })` hooks in reverse initialization order, then disposes container services. A partially initialized extension also receives shutdown. Shutdown continues after individual cleanup errors and reports failures through the existing Kernel result. Initialization receives a lifetime cancellation signal; shutdown has no deadline signal and must settle promptly. The Kernel bounds the caller's shutdown wait, but JavaScript promises cannot be forcibly cancelled. If initialization settles late after cancellation, Norstar cleans that extension up once before disposing its services.
+
+This first extension API uses explicit programmatic wiring. Register extension factories and their dependencies directly in `register`; compiler discovery cannot infer providers hidden inside extension hooks for automatic constructor injection. Import extensions normally from the application entry point to include them in `norstar build`; there is no separate extension container or Kernel. See [the extensions demo](examples/extensions-demo/README.md).
+
 ## HTTP profile
 
 The public package entry point registers the HTTP profile automatically. Configure service modules and route modules in TOML:

@@ -1,5 +1,10 @@
 export { Application } from "./application.ts";
 export type { ApplicationOptions } from "./application.ts";
+export type {
+	ApplicationExtension,
+	ExtensionContext,
+	ExtensionShutdownContext,
+} from "./extensions.ts";
 export { CircularDependencyError, Container } from "./container.ts";
 export { parseConfiguration, loadConfiguration, loadConfigurationSync } from "./configuration.ts";
 export { Kernel } from "./kernel.ts";

@@ -1,0 +1,5 @@
+[application]
+name = "extensions-demo"
+
+[profiles.job]
+type = "job"
