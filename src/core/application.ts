@@ -6,11 +6,14 @@ import { createManifest } from "./manifest.ts";
 import { registerServiceModules } from "./service-modules.ts";
 import { getCompiledApplication } from "./compiled-application.ts";
 import type { CompiledApplicationDefinition } from "./compiled-application.ts";
+import { ExtensionManager } from "./extensions.ts";
+import type { ApplicationExtension } from "./extensions.ts";
 
 export interface ApplicationOptions {
 	readonly compiled?: CompiledApplicationDefinition;
 	readonly configPath?: string;
 	readonly drivers?: readonly ProfileDriver[];
+	readonly extensions?: readonly ApplicationExtension[];
 	readonly configureServices?: (services: Container) => void;
 	readonly handleProcessSignals?: boolean;
 	readonly shutdownTimeoutMs?: number;
@@ -26,6 +29,7 @@ export class Application {
 		private readonly services: Container,
 		private readonly serviceModules: readonly string[],
 		private readonly handleProcessSignals: boolean,
+		private readonly extensions?: ExtensionManager,
 	) {}
 
 	static configure(options: ApplicationOptions = {}): ConfiguredApplication {
@@ -69,6 +73,7 @@ export class Application {
 		try {
 			const signal = this.serviceLoadingAbort.signal;
 			await registerServiceModules(this.serviceModules, this.services, signal);
+			await this.extensions?.initialize(signal);
 			if (signal.aborted) {
 				return await this.kernel.stop();
 			}
@@ -126,15 +131,22 @@ class ConfiguredApplication {
 			}
 		}
 		const services = new Container();
-		compiled?.registerServices(services);
-		this.options.configureServices?.(services);
+		const extensions = new ExtensionManager(this.options.extensions ?? [], services);
+		try {
+			compiled?.registerServices(services);
+			extensions.register();
+			this.options.configureServices?.(services);
+		} catch (error) {
+			void services.dispose().catch(() => undefined);
+			throw error;
+		}
 		const manifest = compiled?.manifest ?? createManifest(config);
 
 		const kernel = new Kernel({
 			config,
 			manifest,
 			drivers,
-			services,
+			services: extensions.container(),
 			shutdownTimeoutMs: this.options.shutdownTimeoutMs,
 		});
 
@@ -143,6 +155,7 @@ class ConfiguredApplication {
 			services,
 			compiled ? [] : manifest.serviceModules,
 			this.options.handleProcessSignals ?? true,
+			extensions,
 		);
 	}
 }
